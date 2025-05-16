@@ -73,11 +73,6 @@ pub fn read_rgb_palette(pal_path: &str) -> std::io::Result<Vec<[u8; 3]>> {
     let mut buffer = [0u8; 768]; // RGB PAL files contain 256 RGB entries (256 * 3 bytes = 768)
     file.read_exact(&mut buffer)?;
 
-    // Perform the shift to convert from 6-bit to 8-bit color range
-    //for byte in buffer.iter_mut() {
-    //    *byte <<= 2;
-    //}
-
     Ok(buffer.chunks(3).map(|c| [c[0], c[1], c[2]]).collect())
 }
 
