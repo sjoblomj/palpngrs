@@ -2,11 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+
 ## [0.2.0] - 2025-05-20
 
 ### Added
 - Function to return a Greyscale palette.
 - This Changelog file.
+- GitHub Action to auto-publish to Cargo on commit.
 
 ### Changed
 - Changed function signature to take in a Palette rather than a path.
