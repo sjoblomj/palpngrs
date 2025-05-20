@@ -36,8 +36,8 @@ where
 /// will create a PNG RGB image in the specified output_path.
 pub fn palettized_image_to_png<T>(
     palettized_image: Vec<u8>,
-    pal_path: &str,
     output_path: &str,
+    palette: Vec<[u8; 3]>,
     use_transparency: bool,
     width:  T,
     height: T,
@@ -55,7 +55,6 @@ where
         palettized_image,
     };
 
-    let palette = read_rgb_palette(pal_path)?;
     let rgb_pixels = draw_image_to_pixel_buffer(image, &palette, use_transparency)?;
     save_rgb_pixels_to_image_file(
         rgb_pixels,
@@ -75,6 +74,18 @@ pub fn read_rgb_palette(pal_path: &str) -> std::io::Result<Vec<[u8; 3]>> {
 
     Ok(buffer.chunks(3).map(|c| [c[0], c[1], c[2]]).collect())
 }
+
+/// Returns greyscale palette with 256 entries
+pub fn greyscale_palette() -> std::io::Result<Vec<[u8; 3]>> {
+    let mut palette = [[0u8; 3]; 256];
+    for (i, rgb) in palette.iter_mut().enumerate() {
+        rgb[0] = i as u8;
+        rgb[1] = i as u8;
+        rgb[2] = i as u8;
+    }
+    Ok(Vec::from(palette))
+}
+
 
 /// Saves the given RGB pixel buffer to the given output path.
 pub fn save_rgb_pixels_to_image_file(
@@ -353,16 +364,6 @@ mod tests {
     use image::{Rgb, RgbImage, Rgba, RgbaImage};
     use std::fs;
 
-    fn dummy_palette() -> Vec<[u8; 3]> {
-        let mut palette = [[0u8; 3]; 256];
-        for (i, rgb) in palette.iter_mut().enumerate() {
-            rgb[0] = i as u8;
-            rgb[1] = i as u8;
-            rgb[2] = i as u8;
-        }
-        Vec::from(palette)
-    }
-
     fn save_test_png_rgb(path: &str, colour: [u8; 3], width: u32, height: u32) {
         let mut img = RgbImage::new(width, height);
         for pixel in img.pixels_mut() {
@@ -383,44 +384,46 @@ mod tests {
 
 
     #[test]
-    fn detects_alpha_correctly() {
-        let palette = dummy_palette();
+    fn detects_alpha_correctly() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path_rgb = "test_rgb.png";
         save_test_png_rgb(path_rgb, [100, 100, 100], 8, 8);
 
-        let result_rgb: PalettizedImageWithMetadata<u8, u16> = read_png(path_rgb, &palette, true).unwrap();
+        let result_rgb: PalettizedImageWithMetadata<u8, u16> = read_png(path_rgb, &palette, true)?;
         for i in 0..result_rgb.palettized_image.len() {
             assert_eq!(result_rgb.palettized_image[i], 100);
         }
-        fs::remove_file(path_rgb).unwrap();
+        fs::remove_file(path_rgb)?;
 
 
         let path_rgba = "test_rgba.png";
         save_test_png_rgba(path_rgba, [100, 100, 100, 255], 8, 8);
 
-        let result_rgba: PalettizedImageWithMetadata<u8, u16> = read_png(path_rgba, &palette, true).unwrap();
+        let result_rgba: PalettizedImageWithMetadata<u8, u16> = read_png(path_rgba, &palette, true)?;
         for i in 0..result_rgba.palettized_image.len() {
             assert_eq!(result_rgba.palettized_image[i], 100);
         }
-        fs::remove_file(path_rgba).unwrap();
+        fs::remove_file(path_rgba)?;
+        Ok(())
     }
 
     #[test]
-    fn drops_alpha_channel_if_not_0() {
-        let palette = dummy_palette();
+    fn drops_alpha_channel_if_not_0() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path_rgba = "test_rgba_alpha.png";
         save_test_png_rgba(path_rgba, [100, 100, 100, 71], 8, 8);
 
-        let trimmed_image: PalettizedImageWithMetadata<u8, u8> = read_png(path_rgba, &palette, true).unwrap();
+        let trimmed_image: PalettizedImageWithMetadata<u8, u8> = read_png(path_rgba, &palette, true)?;
         for i in 0..trimmed_image.palettized_image.len() {
             assert_eq!(trimmed_image.palettized_image[i], 100);
         }
-        fs::remove_file(path_rgba).unwrap();
+        fs::remove_file(path_rgba)?;
+        Ok(())
     }
 
     #[test]
-    fn trims_transparent_rows_and_columns() {
-        let palette = dummy_palette();
+    fn trims_transparent_rows_and_columns() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path = "test_trim.png";
         let mut img = RgbaImage::new(3, 3);
 
@@ -433,54 +436,58 @@ mod tests {
         }
         img.save(path).unwrap();
 
-        let trimmed_image: PalettizedImageWithMetadata<u8, u8> = read_png(path, &palette, true).unwrap();
+        let trimmed_image: PalettizedImageWithMetadata<u8, u8> = read_png(path, &palette, true)?;
         assert_eq!(trimmed_image.width,    1);
         assert_eq!(trimmed_image.height,   1);
         assert_eq!(trimmed_image.x_offset, 1);
         assert_eq!(trimmed_image.y_offset, 1);
 
-        fs::remove_file(path).unwrap();
+        fs::remove_file(path)?;
+        Ok(())
     }
 
     #[test]
-    fn maps_non_exact_colours() {
-        let palette = dummy_palette();
+    fn maps_non_exact_colours() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path = "test_colour.png";
         save_test_png_rgb(path, [100, 100, 101], 1, 1);
 
-        let result: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette, false).unwrap();
+        let result: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette, false)?;
 
         assert_eq!(result.palettized_image[0], 100); // Closest match
-        fs::remove_file(path).unwrap();
+        fs::remove_file(path)?;
+        Ok(())
     }
 
     #[test]
-    fn whole_image_is_transparent_and_trimmed_away() {
-        let palette = dummy_palette();
+    fn whole_image_is_transparent_and_trimmed_away() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path = "test_transparency.png";
         save_test_png_rgba(path, [0, 0, 0, 0], 1, 1); // Fully transparent
 
-        let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette, true).unwrap();
+        let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette, true)?;
 
         assert_eq!(trimmed_image.palettized_image.len(), 0);
-        fs::remove_file(path).unwrap();
+        fs::remove_file(path)?;
+        Ok(())
     }
 
     #[test]
-    fn whole_image_is_transparent_but_not_trimmed_away() {
-        let palette = dummy_palette();
+    fn whole_image_is_transparent_but_not_trimmed_away() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path = "test_transparency_without_trimming.png";
         save_test_png_rgba(path, [0, 0, 0, 0], 1, 1); // Fully transparent
 
-        let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette, false).unwrap();
+        let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette, false)?;
 
         assert_eq!(trimmed_image.palettized_image.len(), 1);
-        fs::remove_file(path).unwrap();
+        fs::remove_file(path)?;
+        Ok(())
     }
 
     #[test]
-    fn image_exactly_255x255() {
-        let palette = dummy_palette();
+    fn image_exactly_255x255() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path = "test_image_exactly_255x255.png";
         let mut img = RgbaImage::new(255, 255);
         for pixel in img.pixels_mut() {
@@ -488,15 +495,16 @@ mod tests {
         }
         img.save(&path).unwrap();
 
-        let result: PalettizedImageWithMetadata<u8, u8> = read_png(path, &palette, true).unwrap();
+        let result: PalettizedImageWithMetadata<u8, u8> = read_png(path, &palette, true)?;
         assert_eq!(result.width  + result.x_offset, 255);
         assert_eq!(result.height + result.y_offset, 255);
-        fs::remove_file(path).unwrap();
+        fs::remove_file(path)?;
+        Ok(())
     }
 
     #[test]
-    fn image_just_above_255x255() {
-        let palette = dummy_palette();
+    fn image_just_above_255x255() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path = "test_image_just_above_255x255.png";
         let mut img = RgbaImage::new(256, 256);
         for pixel in img.pixels_mut() {
@@ -506,12 +514,13 @@ mod tests {
 
         let result: Result<PalettizedImageWithMetadata<u8, u8>, Error> = read_png(path, &palette, false);
         assert!(result.is_err());
-        fs::remove_file(path).unwrap();
+        fs::remove_file(path)?;
+        Ok(())
     }
 
     #[test]
-    fn image_too_many_transparent_pixes() {
-        let palette = dummy_palette();
+    fn image_too_many_transparent_pixes() -> Result<(), Error> {
+        let palette = greyscale_palette()?;
         let path = "test_image_too_many_transparent_pixels.png";
         let mut img = RgbaImage::new(300, 300);
 
@@ -526,6 +535,7 @@ mod tests {
 
         let result: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(path, &palette, true);
         assert!(result.is_err());
-        fs::remove_file(path).unwrap();
+        fs::remove_file(path)?;
+        Ok(())
     }
 }
