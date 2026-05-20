@@ -607,18 +607,15 @@ mod tests {
     }
 
     #[test]
-    fn image_too_many_transparent_pixes() -> Result<(), Error> {
+    fn image_too_many_transparent_pixels() -> Result<(), Error> {
         let palette = greyscale_palette()?;
         let path = "test_image_too_many_transparent_pixels.png";
-        let mut img = RgbaImage::new(300, 300);
 
-        // 260 pixels transparent on the top and left
-        for y in 0..3 {
-            for x in 0..3 {
-                let alpha = if x > 260 && y > 260 { 255 } else { 0 };
-                img.put_pixel(x, y, Rgba([100, 100, 100, alpha]));
-            }
-        }
+        // 300x1 image where the only visible pixel sits at x=260, so trimming
+        // produces trim_left=260. That offset does not fit in the u8 offset
+        // type chosen below, so read_png must return an error.
+        let mut img = RgbaImage::new(300, 1);
+        img.put_pixel(260, 0, Rgba([100, 100, 100, 255]));
         img.save(&path).unwrap();
 
         let result: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(path, &palette, true);
