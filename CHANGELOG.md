@@ -4,8 +4,11 @@ All notable changes to this project will be documented in this file.
 
 
 ## [0.3.0] - unreleased
+### Added
+- Two new sections to the readme.
 
 ### Changed
+- `greyscale_palette` returns the palette directly instead of wrapping it in `Result`, since it cannot fail. Callers that previously used `?` or `unwrap` should drop them.
 - Take palette by slice (`&[[u8; 3]]`) instead of `&Vec<[u8; 3]>`, so callers don't have to materialise a `Vec` to pass in their palette.
 - Now caching the palette to avoid looking up colours in the wrong palette if multiple calls are made with different palettes.
 - No longer maps opaque colours to the transparent colour at index 0.
@@ -13,7 +16,6 @@ All notable changes to this project will be documented in this file.
 - Validate inputs to `draw_image_to_pixel_buffer` and return errors for mismatched image size, out-of-range palette indices, offsets outside the canvas, or an empty palette, instead of panicking.
 - Return an error instead of panicking when image dimensions don't fit in the numeric type chosen by the caller.
 - `read_png` now requires the palette to have at least two entries (index 0 plus at least one opaque colour) and returns an error otherwise.
-- `greyscale_palette` returns the palette directly instead of wrapping it in `Result`, since it cannot fail. Callers that previously used `?` or `unwrap` should drop them.
 - Minor stylistic code fixes.
 
 ### Removed

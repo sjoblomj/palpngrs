@@ -8,3 +8,20 @@ pixels, Palettized images contain indices into a palette.
 This library can read 256 RBG palettes and convert Palettized
 images to PNGs. It can also convert PNGs to Palettized images
 by looking up each pixel's RGB value in the palette.
+
+## Transparency
+Palette index `0` is reserved for the transparent colour.
+Fully-transparent PNG pixels are written as `0`, and opaque
+pixels are never mapped to `0` (even if `palette[0]` is the
+closest RGB match). When drawing back to a PNG with transparency
+enabled, index `0` becomes a transparent pixel and all other
+indices become opaque.
+
+## Building
+Requires Rust 1.80 or newer (for `std::sync::LazyLock`).
+
+```sh
+cargo build              # debug build
+cargo build --release    # optimised build
+cargo test               # run the test suite
+```
