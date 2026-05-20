@@ -89,14 +89,14 @@ pub fn read_rgb_palette(pal_path: &str) -> std::io::Result<Vec<[u8; 3]>> {
 }
 
 /// Returns greyscale palette with 256 entries
-pub fn greyscale_palette() -> std::io::Result<Vec<[u8; 3]>> {
+pub fn greyscale_palette() -> Vec<[u8; 3]> {
     let mut palette = [[0u8; 3]; 256];
     for (i, rgb) in palette.iter_mut().enumerate() {
         rgb[0] = i as u8;
         rgb[1] = i as u8;
         rgb[2] = i as u8;
     }
-    Ok(Vec::from(palette))
+    Vec::from(palette)
 }
 
 
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn detects_alpha_correctly() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path_rgb = "test_rgb.png";
         save_test_png_rgb(path_rgb, [100, 100, 100], 8, 8);
 
@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn drops_alpha_channel_if_not_0() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path_rgba = "test_rgba_alpha.png";
         save_test_png_rgba(path_rgba, [100, 100, 100, 71], 8, 8);
 
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn trims_transparent_rows_and_columns() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path = "test_trim.png";
         let mut img = RgbaImage::new(3, 3);
 
@@ -528,7 +528,7 @@ mod tests {
 
     #[test]
     fn maps_non_exact_colours() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path = "test_colour.png";
         save_test_png_rgb(path, [100, 100, 101], 1, 1);
 
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn whole_image_is_transparent_and_trimmed_away() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path = "test_transparency.png";
         save_test_png_rgba(path, [0, 0, 0, 0], 1, 1); // Fully transparent
 
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn whole_image_is_transparent_but_not_trimmed_away() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path = "test_transparency_without_trimming.png";
         save_test_png_rgba(path, [0, 0, 0, 0], 1, 1); // Fully transparent
 
@@ -567,7 +567,7 @@ mod tests {
 
     #[test]
     fn image_exactly_255x255() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path = "test_image_exactly_255x255.png";
         let mut img = RgbaImage::new(255, 255);
         for pixel in img.pixels_mut() {
@@ -584,7 +584,7 @@ mod tests {
 
     #[test]
     fn image_just_above_255x255() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path = "test_image_just_above_255x255.png";
         let mut img = RgbaImage::new(256, 256);
         for pixel in img.pixels_mut() {
@@ -600,7 +600,7 @@ mod tests {
 
     #[test]
     fn image_too_many_transparent_pixels() -> Result<(), Error> {
-        let palette = greyscale_palette()?;
+        let palette = greyscale_palette();
         let path = "test_image_too_many_transparent_pixels.png";
 
         // 300x1 image where the only visible pixel sits at x=260, so trimming
