@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
 - Now caching the palette to avoid looking up colours in the wrong palette if multiple calls are made with different palettes.
 - No longer maps opaque colours to the transparent colour at index 0.
 - Corrected debug offsets in log lines.
+- Validate inputs to `draw_image_to_pixel_buffer` and return errors for mismatched image size, out-of-range palette indices, offsets outside the canvas, or an empty palette, instead of panicking.
+- Return an error instead of panicking when image dimensions don't fit in the numeric type chosen by the caller.
 
 ### Removed
 - Removed the `once_cell` dependency, replacing it with `std::sync::LazyLock` instead.

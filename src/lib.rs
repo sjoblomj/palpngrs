@@ -73,8 +73,8 @@ where
         rgb_pixels,
         output_path,
         use_transparency,
-        width .try_into().unwrap(),
-        height.try_into().unwrap(),
+        to_u32(width,  "width")?,
+        to_u32(height, "height")?,
     )
 }
 
@@ -138,14 +138,56 @@ where
     O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug,
     S: TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug,
 {
-    let height     = image.height  .try_into().unwrap();
-    let width      = image.width   .try_into().unwrap();
-    let x_offset   = image.x_offset.try_into().unwrap();
-    let y_offset   = image.y_offset.try_into().unwrap();
-    let max_width  = image.original_width .try_into().unwrap();
-    let max_height = image.original_height.try_into().unwrap();
+    let height     = to_u32(image.height,          "height")?;
+    let width      = to_u32(image.width,           "width")?;
+    let x_offset   = to_u32(image.x_offset,        "x_offset")?;
+    let y_offset   = to_u32(image.y_offset,        "y_offset")?;
+    let max_width  = to_u32(image.original_width,  "original_width")?;
+    let max_height = to_u32(image.original_height, "original_height")?;
 
-    let mut buffer = vec![0u8; (max_width * max_height * if use_transparency { 4 } else { 3 }) as usize];
+    let expected_len = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "image dimensions overflow usize"))?;
+    if image.palettized_image.len() < expected_len {
+        return Err(Error::new(ErrorKind::InvalidInput, format!(
+            "palettized_image has {} entries, expected at least {} ({}x{})",
+            image.palettized_image.len(), expected_len, width, height,
+        )));
+    }
+
+    if x_offset.checked_add(width).is_none_or(|v| v > max_width) {
+        return Err(Error::new(ErrorKind::InvalidInput, format!(
+            "x_offset ({}) + width ({}) exceeds original_width ({})",
+            x_offset, width, max_width,
+        )));
+    }
+    if y_offset.checked_add(height).is_none_or(|v| v > max_height) {
+        return Err(Error::new(ErrorKind::InvalidInput, format!(
+            "y_offset ({}) + height ({}) exceeds original_height ({})",
+            y_offset, height, max_height,
+        )));
+    }
+
+    let channels = if use_transparency { 4usize } else { 3usize };
+    let buffer_size = (max_width as usize)
+        .checked_mul(max_height as usize)
+        .and_then(|v| v.checked_mul(channels))
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "buffer size overflows usize"))?;
+
+    if expected_len > 0 {
+        if palette.is_empty() {
+            return Err(Error::new(ErrorKind::InvalidInput, "palette is empty"));
+        }
+        let max_index = *image.palettized_image[..expected_len].iter().max().unwrap() as usize;
+        if max_index >= palette.len() {
+            return Err(Error::new(ErrorKind::InvalidInput, format!(
+                "palettized_image contains index {} but palette has only {} entries",
+                max_index, palette.len(),
+            )));
+        }
+    }
+
+    let mut buffer = vec![0u8; buffer_size];
 
     for y in 0..height {
         for x in 0..width {
@@ -386,6 +428,10 @@ fn cast<T: TryFrom<u32>>(value: u32, name: &str) -> Result<T, Error> {
     T::try_from(value).map_err(|_| Error::new(ErrorKind::InvalidInput, format!("{} out of range", name)))
 }
 
+fn to_u32<T: TryInto<u32>>(value: T, name: &str) -> Result<u32, Error> {
+    value.try_into().map_err(|_| Error::new(ErrorKind::InvalidInput, format!("{} out of u32 range", name)))
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -607,5 +653,85 @@ mod tests {
         assert_eq!(result.palettized_image[0], 7);
         fs::remove_file(path)?;
         Ok(())
+    }
+
+    fn make_image(
+        x_offset: u32, y_offset: u32, width: u32, height: u32,
+        original_width: u32, original_height: u32, pixels: Vec<u8>,
+    ) -> PalettizedImageWithMetadata<u32, u32> {
+        PalettizedImageWithMetadata {
+            x_offset, y_offset, width, height,
+            original_width, original_height,
+            palettized_image: pixels,
+        }
+    }
+
+    #[test]
+    fn draw_rejects_palettized_image_shorter_than_width_times_height() {
+        let palette = vec![[0u8; 3]; 2];
+        // Claims 4x4 but only provides 8 entries.
+        let image = make_image(0, 0, 4, 4, 4, 4, vec![0u8; 8]);
+        let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn draw_rejects_offset_outside_original_canvas() {
+        let palette = vec![[0u8; 3]; 2];
+        // x_offset (3) + width (2) > original_width (4)
+        let image = make_image(3, 0, 2, 2, 4, 4, vec![0u8; 4]);
+        let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+
+        // y_offset (3) + height (2) > original_height (4)
+        let image = make_image(0, 3, 2, 2, 4, 4, vec![0u8; 4]);
+        let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn draw_rejects_palette_index_out_of_range() {
+        let palette = vec![[0u8; 3]; 3]; // valid indices: 0..=2
+        let image = make_image(0, 0, 2, 2, 2, 2, vec![0, 1, 2, 5]);
+        let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn draw_rejects_empty_palette_with_non_empty_image() {
+        let palette: Vec<[u8; 3]> = Vec::new();
+        let image = make_image(0, 0, 1, 1, 1, 1, vec![0]);
+        let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn draw_rejects_dimensions_that_do_not_fit_in_u32() {
+        let palette = vec![[0u8; 3]; 1];
+        let too_big: u64 = u32::MAX as u64 + 1;
+        let image: PalettizedImageWithMetadata<u64, u64> = PalettizedImageWithMetadata {
+            x_offset: 0, y_offset: 0,
+            width:  too_big, height: 1,
+            original_width:  too_big, original_height: 1,
+            palettized_image: vec![0u8; 0],
+        };
+        let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn palettized_image_to_png_rejects_dimensions_that_do_not_fit_in_u32() {
+        let palette: Vec<[u8; 3]> = vec![[0u8; 3]; 1];
+        let too_big: u64 = u32::MAX as u64 + 1;
+        let result = palettized_image_to_png(
+            vec![0u8; 0],
+            "test_overflow_not_created.png",
+            palette,
+            false,
+            too_big,
+            1u64,
+        );
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
     }
 }
