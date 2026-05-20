@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 
+## [0.3.0] - unreleased
+
+### Changed
+- Take palette by slice (`&[[u8; 3]]`) instead of `&Vec<[u8; 3]>`, so callers don't have to materialise a `Vec` to pass in their palette.
+
+
 ## [0.2.0] - 2025-05-20
 
 ### Added

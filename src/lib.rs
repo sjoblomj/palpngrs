@@ -113,7 +113,7 @@ pub fn save_rgb_pixels_to_image_file(
 /// Uses the given palette for colour lookups.
 pub fn draw_image_to_pixel_buffer<O, S>(
     image: PalettizedImageWithMetadata<O, S>,
-    palette: &Vec<[u8; 3]>,
+    palette: &[[u8; 3]],
     use_transparency: bool,
 ) -> std::io::Result<Vec<u8>>
 where
@@ -163,7 +163,7 @@ where
 /// so that only the non-transparent parts of the image remains.
 pub fn read_png<O, S>(
     png_file_name: &str,
-    palette: &Vec<[u8; 3]>,
+    palette: &[[u8; 3]],
     trim_transparent_pixels: bool,
 ) -> std::io::Result<PalettizedImageWithMetadata<O, S>>
 where
@@ -223,7 +223,7 @@ where
 fn cached_map_colour_to_palette_index(
     colour: [u8; 3],
     alpha: Option<u8>,
-    palette: &Vec<[u8; 3]>,
+    palette: &[[u8; 3]],
 ) -> u8 {
     let key = (colour, alpha);
 
@@ -241,7 +241,7 @@ fn cached_map_colour_to_palette_index(
     result
 }
 
-fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &Vec<[u8; 3]>) -> u8 {
+fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u8; 3]]) -> u8 {
     if alpha == Some(0) {
         return 0; // Transparent
     }
@@ -276,7 +276,7 @@ fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &Vec
     best_index as u8
 }
 
-fn trim_away_transparency(pixels_2d: &Vec<Vec<u8>>, width: u32, height: u32) -> (u32, u32, u32, u32) {
+fn trim_away_transparency(pixels_2d: &[Vec<u8>], width: u32, height: u32) -> (u32, u32, u32, u32) {
     // Determine how many rows/columns to trim from each edge
     let mut trim_top:    u32 = 0;
     let mut trim_bottom: u32 = 0;
