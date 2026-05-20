@@ -13,6 +13,7 @@ All notable changes to this project will be documented in this file.
 - Validate inputs to `draw_image_to_pixel_buffer` and return errors for mismatched image size, out-of-range palette indices, offsets outside the canvas, or an empty palette, instead of panicking.
 - Return an error instead of panicking when image dimensions don't fit in the numeric type chosen by the caller.
 - `read_png` now requires the palette to have at least two entries (index 0 plus at least one opaque colour) and returns an error otherwise.
+- Minor stylistic code fixes.
 
 ### Removed
 - Removed the `once_cell` dependency, replacing it with `std::sync::LazyLock` instead.

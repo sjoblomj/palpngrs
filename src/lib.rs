@@ -119,7 +119,7 @@ pub fn save_rgb_pixels_to_image_file(
                 .expect("Failed to create RGB image"),
         )
     };
-    image.save(&output_path).map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+    image.save(output_path).map_err(|e| Error::other(e.to_string()))
 }
 
 /// Draws a palettized image into an RGB pixel buffer (Vec<u8>).
@@ -244,11 +244,11 @@ where
         )));
     }
     let img = image::open(png_file_name)
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
-    let has_alpha = match img.color() {
-        ColorType::Rgba8 | ColorType::La8 | ColorType::Rgba16 | ColorType::La16 => true,
-        _ => false,
-    };
+        .map_err(|e| Error::other(e.to_string()))?;
+    let has_alpha = matches!(
+        img.color(),
+        ColorType::Rgba8 | ColorType::La8 | ColorType::Rgba16 | ColorType::La16,
+    );
     let img_data = img.to_rgba8();
 
     let (width, height) = img_data.dimensions();
@@ -322,7 +322,7 @@ fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u
     if alpha == Some(0) {
         return 0; // Transparent
     }
-    if alpha != Some(255) && alpha != None {
+    if alpha != Some(255) && alpha.is_some() {
         warn!(
             "Pixel [{}, {}, {}, {}] is neither fully transparent nor fully opaque. Will drop the alpha channel.",
             colour[0], colour[1], colour[2], alpha.unwrap(),
