@@ -224,7 +224,10 @@ where
 ///
 /// Palette index `0` is reserved for the transparent colour: fully-transparent
 /// input pixels are written as `0`, and opaque input pixels are never mapped
-/// to `0` (even if `palette[0]` is the closest RGB match).
+/// to `0` (even if `palette[0]` is the closest RGB match). The palette must
+/// therefore contain at least two entries (one for the transparent colour
+/// plus at least one opaque colour to match against); otherwise an error of
+/// kind [`ErrorKind::InvalidInput`] is returned.
 pub fn read_png<O, S>(
     png_file_name: &str,
     palette: &[[u8; 3]],
@@ -234,6 +237,12 @@ where
     O: TryFrom<u32>,
     S: TryFrom<u32>,
 {
+    if palette.len() < 2 {
+        return Err(Error::new(ErrorKind::InvalidInput, format!(
+            "palette must have at least 2 entries (index 0 is reserved for transparency), got {}",
+            palette.len(),
+        )));
+    }
     let img = image::open(png_file_name)
         .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
     let has_alpha = match img.color() {
@@ -313,6 +322,10 @@ fn cached_map_colour_to_palette_index(
 /// pixels are always mapped to 0, and opaque pixels are never mapped to 0
 /// (even if `palette[0]` happens to be the closest RGB match). This avoids
 /// opaque pixels round-tripping as transparent in `draw_image_to_pixel_buffer`.
+///
+/// Precondition: `palette.len() >= 2`. Callers must validate this; the
+/// nearest-colour search skips index 0, so a palette with fewer than two
+/// entries would yield an invalid result.
 fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u8; 3]]) -> u8 {
     if alpha == Some(0) {
         return 0; // Transparent
@@ -733,5 +746,22 @@ mod tests {
         );
         let err = result.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn read_png_rejects_palette_shorter_than_two_entries() -> Result<(), Error> {
+        let path = "test_short_palette.png";
+        save_test_png_rgb(path, [100, 100, 100], 1, 1);
+
+        let empty: Vec<[u8; 3]> = Vec::new();
+        let r0: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(path, &empty, false);
+        assert_eq!(r0.err().unwrap().kind(), ErrorKind::InvalidInput);
+
+        let one = vec![[0u8; 3]];
+        let r1: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(path, &one, false);
+        assert_eq!(r1.err().unwrap().kind(), ErrorKind::InvalidInput);
+
+        fs::remove_file(path)?;
+        Ok(())
     }
 }
