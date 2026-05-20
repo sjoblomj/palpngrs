@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Take palette by slice (`&[[u8; 3]]`) instead of `&Vec<[u8; 3]>`, so callers don't have to materialise a `Vec` to pass in their palette.
 - Now caching the palette to avoid looking up colours in the wrong palette if multiple calls are made with different palettes.
 - No longer maps opaque colours to the transparent colour at index 0.
+- Corrected debug offsets in log lines.
 
 ### Removed
 - Removed the `once_cell` dependency, replacing it with `std::sync::LazyLock` instead.

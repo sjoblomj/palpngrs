@@ -372,13 +372,11 @@ fn trim_away_transparency(pixels_2d: &[Vec<u8>], width: u32, height: u32) -> (u3
 
     debug!(
         "width:  0x{:0>2X} ({}),  new_width: 0x{:0>2X} ({}), x_offset: 0x{:0>2X} ({})",
-        width, width, new_width, new_width,
-        (width - new_width) / 2, (width - new_width) / 2,
+        width, width, new_width, new_width, trim_left, trim_left,
     );
     debug!(
         "height: 0x{:0>2X} ({}), new_height: 0x{:0>2X} ({}), y_offset: 0x{:0>2X} ({})",
-        height, height, new_height, new_height,
-        (height - new_height) / 2, (height - new_height) / 2,
+        height, height, new_height, new_height, trim_top, trim_top,
     );
 
     (new_width, new_height, trim_left, trim_top)
