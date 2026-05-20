@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 ### Changed
 - Take palette by slice (`&[[u8; 3]]`) instead of `&Vec<[u8; 3]>`, so callers don't have to materialise a `Vec` to pass in their palette.
 
+### Removed
+- Removed the `once_cell` dependency, replacing it with `std::sync::LazyLock` instead.
+
 
 ## [0.2.0] - 2025-05-20
 

@@ -532,7 +532,6 @@ version = "0.2.0"
 dependencies = [
  "image",
  "log",
- "once_cell",
 ]
 
 [[package]]

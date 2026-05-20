@@ -1,14 +1,13 @@
 use image::{ColorType, DynamicImage, ImageBuffer};
 use log::{debug, error, info, warn};
-use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 type CacheKey = ([u8; 3], Option<u8>);
-static COLOUR_INDEX_CACHE: Lazy<Mutex<HashMap<CacheKey, u8>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+static COLOUR_INDEX_CACHE: LazyLock<Mutex<HashMap<CacheKey, u8>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub struct PalettizedImageWithMetadata<O, S>
 where

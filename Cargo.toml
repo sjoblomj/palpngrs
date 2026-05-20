@@ -12,5 +12,4 @@ keywords = ["graphics"]
 
 [dependencies]
 image = "0.25.6"     # For image manipulation (PNG handling)
-once_cell = "1.21.3" # For caching for performance improvements - not needed for functionality as such
 log = "0.4.27"
