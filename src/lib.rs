@@ -3,11 +3,18 @@ use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Error, ErrorKind, Read};
 use std::sync::{LazyLock, Mutex};
 
-type CacheKey = ([u8; 3], Option<u8>);
+type CacheKey = (u64, [u8; 3], Option<u8>);
 static COLOUR_INDEX_CACHE: LazyLock<Mutex<HashMap<CacheKey, u8>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn palette_hash(palette: &[[u8; 3]]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    palette.hash(&mut hasher);
+    hasher.finish()
+}
 
 pub struct PalettizedImageWithMetadata<O, S>
 where
@@ -183,6 +190,7 @@ where
         png_file_name, has_alpha, width, height, width, height,
     );
 
+    let pal_hash = palette_hash(palette);
     let mut pixels_2d = vec![vec![0u8; width as usize]; height as usize];
     for (y, row) in img_data.rows().enumerate() {
         for (x, pixel) in row.enumerate() {
@@ -192,7 +200,7 @@ where
             } else {
                 None
             };
-            let index = cached_map_colour_to_palette_index(rgb, alpha, palette);
+            let index = cached_map_colour_to_palette_index(pal_hash, rgb, alpha, palette);
             pixels_2d[y][x] = index;
         }
     }
@@ -220,11 +228,12 @@ where
 }
 
 fn cached_map_colour_to_palette_index(
+    palette_hash: u64,
     colour: [u8; 3],
     alpha: Option<u8>,
     palette: &[[u8; 3]],
 ) -> u8 {
-    let key = (colour, alpha);
+    let key = (palette_hash, colour, alpha);
 
     // Attempt to get cached result
     if let Some(result) = COLOUR_INDEX_CACHE.lock().unwrap().get(&key) {
@@ -534,6 +543,27 @@ mod tests {
 
         let result: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(path, &palette, true);
         assert!(result.is_err());
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn cache_is_keyed_per_palette() -> Result<(), Error> {
+        let path = "test_cache_per_palette.png";
+        save_test_png_rgb(path, [10, 20, 30], 1, 1);
+
+        // Palette A: the exact colour sits at index 5
+        let mut palette_a = vec![[0u8; 3]; 256];
+        palette_a[5] = [10, 20, 30];
+        // Palette B: the exact colour sits at index 9
+        let mut palette_b = vec![[0u8; 3]; 256];
+        palette_b[9] = [10, 20, 30];
+
+        let result_a: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette_a, false)?;
+        let result_b: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette_b, false)?;
+
+        assert_eq!(result_a.palettized_image[0], 5);
+        assert_eq!(result_b.palettized_image[0], 9);
         fs::remove_file(path)?;
         Ok(())
     }
