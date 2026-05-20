@@ -16,6 +16,13 @@ fn palette_hash(palette: &[[u8; 3]]) -> u64 {
     hasher.finish()
 }
 
+/// A palettized image plus the offsets and dimensions needed to place it
+/// inside its original canvas.
+///
+/// Palette index `0` is reserved for the transparent colour. Both
+/// [`read_png`] and [`draw_image_to_pixel_buffer`] treat index `0` as
+/// "transparent" and never use it for an opaque colour, regardless of what
+/// RGB value sits at `palette[0]`.
 pub struct PalettizedImageWithMetadata<O, S>
 where
     O: TryFrom<u32>, // Offset type
@@ -34,7 +41,7 @@ where
     /// original height of the image, before any trimming or offsetting was done
     pub original_height: S,
     /// Palettized image, i.e. every element is an index to an external palette.
-    /// This is thus not an RGB pixel.
+    /// This is thus not an RGB pixel. Index `0` denotes a transparent pixel.
     pub palettized_image: Vec<u8>,
 }
 
@@ -117,6 +124,11 @@ pub fn save_rgb_pixels_to_image_file(
 
 /// Draws a palettized image into an RGB pixel buffer (Vec<u8>).
 /// Uses the given palette for colour lookups.
+///
+/// When `use_transparency` is `true`, pixels with palette index `0` are
+/// written with alpha `0` (transparent) and all other indices with alpha
+/// `255` (opaque). Palette index `0` is reserved for the transparent
+/// colour; see [`PalettizedImageWithMetadata`].
 pub fn draw_image_to_pixel_buffer<O, S>(
     image: PalettizedImageWithMetadata<O, S>,
     palette: &[[u8; 3]],
@@ -167,6 +179,10 @@ where
 /// lookups using the given palette. If trim_transparent_pixels is set to true,
 /// any rows or columns where all pixels are transparent will be trimmed away,
 /// so that only the non-transparent parts of the image remains.
+///
+/// Palette index `0` is reserved for the transparent colour: fully-transparent
+/// input pixels are written as `0`, and opaque input pixels are never mapped
+/// to `0` (even if `palette[0]` is the closest RGB match).
 pub fn read_png<O, S>(
     png_file_name: &str,
     palette: &[[u8; 3]],
@@ -249,6 +265,12 @@ fn cached_map_colour_to_palette_index(
     result
 }
 
+/// Maps an RGB(A) pixel to a palette index.
+///
+/// Palette index 0 is reserved for the transparent colour: fully-transparent
+/// pixels are always mapped to 0, and opaque pixels are never mapped to 0
+/// (even if `palette[0]` happens to be the closest RGB match). This avoids
+/// opaque pixels round-tripping as transparent in `draw_image_to_pixel_buffer`.
 fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u8; 3]]) -> u8 {
     if alpha == Some(0) {
         return 0; // Transparent
@@ -259,10 +281,11 @@ fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u
             colour[0], colour[1], colour[2], alpha.unwrap(),
         );
     }
-    let mut best_index = 0;
+    let mut best_index = 1;
     let mut best_distance = u32::MAX;
 
-    for (i, &pal_colour) in palette.iter().enumerate() {
+    // Skip index 0: it is reserved for the transparent colour.
+    for (i, &pal_colour) in palette.iter().enumerate().skip(1) {
         let dr = colour[0] as i32 - pal_colour[0]  as i32;
         let dg = colour[1] as i32 - pal_colour[1]  as i32;
         let db = colour[2] as i32 - pal_colour[2]  as i32;
@@ -564,6 +587,26 @@ mod tests {
 
         assert_eq!(result_a.palettized_image[0], 5);
         assert_eq!(result_b.palettized_image[0], 9);
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn opaque_pixel_never_maps_to_index_zero() -> Result<(), Error> {
+        let path = "test_opaque_not_zero.png";
+        // Opaque white pixel whose closest match would otherwise be palette[0]
+        save_test_png_rgba(path, [255, 255, 255, 255], 1, 1);
+
+        // Palette where index 0 is the exact white match, but a different
+        // (non-exact) white sits at another index.
+        let mut palette = vec![[0u8; 3]; 256];
+        palette[0] = [255, 255, 255];
+        palette[7] = [254, 254, 254];
+
+        let result: PalettizedImageWithMetadata<u8, u16> = read_png(path, &palette, false)?;
+        assert_ne!(result.palettized_image[0], 0,
+            "opaque pixel must not be mapped to the reserved transparent index");
+        assert_eq!(result.palettized_image[0], 7);
         fs::remove_file(path)?;
         Ok(())
     }
