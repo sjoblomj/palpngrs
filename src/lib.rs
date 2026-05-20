@@ -301,19 +301,11 @@ fn cached_map_colour_to_palette_index(
     palette: &[[u8; 3]],
 ) -> u8 {
     let key = (palette_hash, colour, alpha);
-
-    // Attempt to get cached result
-    if let Some(result) = COLOUR_INDEX_CACHE.lock().unwrap().get(&key) {
-        return *result;
-    }
-
-    // Compute if not cached
-    let result = map_colour_to_palette_index(colour, alpha, palette);
-
-    // Insert into cache
-    COLOUR_INDEX_CACHE.lock().unwrap().insert(key, result);
-
-    result
+    *COLOUR_INDEX_CACHE
+        .lock()
+        .unwrap()
+        .entry(key)
+        .or_insert_with(|| map_colour_to_palette_index(colour, alpha, palette))
 }
 
 /// Maps an RGB(A) pixel to a palette index.
