@@ -11,6 +11,7 @@ All notable changes to this project will be documented in this file.
 - `greyscale_palette` returns the palette directly instead of wrapping it in `Result`, since it cannot fail. Callers that previously used `?` or `unwrap` should drop them.
 - Take palette by slice (`&[[u8; 3]]`) instead of `&Vec<[u8; 3]>`, so callers don't have to materialise a `Vec` to pass in their palette.
 - Now caching the palette to avoid looking up colours in the wrong palette if multiple calls are made with different palettes.
+- Relaxed dependency requirements.
 - No longer maps opaque colours to the transparent colour at index 0.
 - Corrected debug offsets in log lines.
 - Validate inputs to `draw_image_to_pixel_buffer` and return errors for mismatched image size, out-of-range palette indices, offsets outside the canvas, or an empty palette, instead of panicking.
@@ -19,7 +20,7 @@ All notable changes to this project will be documented in this file.
 - Minor stylistic code fixes.
 
 ### Removed
-- Removed the `once_cell` dependency, replacing it with `std::sync::LazyLock` instead.
+- Removed the `once_cell` dependency, replacing it with `std::sync::LazyLock` instead. This requires Rust 1.80 or newer.
 
 
 ## [0.2.0] - 2025-05-20

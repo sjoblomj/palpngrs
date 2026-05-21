@@ -11,5 +11,5 @@ categories = ["graphics", "multimedia::encoding"]
 keywords = ["graphics"]
 
 [dependencies]
-image = "0.25.6"     # For image manipulation (PNG handling)
-log = "0.4.27"
+image = "0.25"     # For image manipulation (PNG handling)
+log = "0.4"
