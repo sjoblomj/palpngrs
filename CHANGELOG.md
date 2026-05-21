@@ -14,7 +14,7 @@ All notable changes to this project will be documented in this file.
 - `read_png` now uses a single flat `Vec<u8>` with stride indexing instead of a `Vec<Vec<u8>>` scratch buffer, removing the per-row allocations and a redundant full copy.
 - `read_png` only converts the decoded image to RGBA when it actually has an alpha channel; RGB inputs are decoded as RGB, avoiding a full-image allocation.
 - `read_rgb_palette` now returns `ErrorKind::InvalidData` with a descriptive message when the palette file is not exactly 768 bytes, instead of silently ignoring trailing bytes or surfacing a bare `UnexpectedEof`.
-- Now caching the palette to avoid looking up colours in the wrong palette if multiple calls are made with different palettes.
+- Replaced the global colour-index cache with a per-call local `HashMap`. Consecutive calls with different palettes no longer give incorrect results.
 - Relaxed dependency requirements.
 - No longer maps opaque colours to the transparent colour at index 0.
 - Corrected debug offsets in log lines.

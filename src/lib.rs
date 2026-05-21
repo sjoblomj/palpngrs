@@ -3,18 +3,7 @@ use log::{debug, error, info, warn};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Error, ErrorKind, Read};
-use std::sync::{LazyLock, Mutex};
-
-type CacheKey = (u64, [u8; 3], Option<u8>);
-static COLOUR_INDEX_CACHE: LazyLock<Mutex<HashMap<CacheKey, u8>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn palette_hash(palette: &[[u8; 3]]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    palette.hash(&mut hasher);
-    hasher.finish()
-}
 
 /// A palettized image plus the offsets and dimensions needed to place it
 /// inside its original canvas.
@@ -283,7 +272,6 @@ where
         png_file_name, has_alpha, width, height, width, height,
     );
 
-    let pal_hash = palette_hash(palette);
     let stride = width as usize;
     let (raw, channels) = if has_alpha {
         (img.to_rgba8().into_raw(), 4usize)
@@ -291,10 +279,13 @@ where
         (img.to_rgb8().into_raw(), 3usize)
     };
     let mut pixels = vec![0u8; stride * height as usize];
+    let mut cache: HashMap<([u8; 3], Option<u8>), u8> = HashMap::new();
     for (i, chunk) in raw.chunks_exact(channels).enumerate() {
         let rgb = [chunk[0], chunk[1], chunk[2]];
         let alpha = if has_alpha { Some(chunk[3]) } else { None };
-        pixels[i] = cached_map_colour_to_palette_index(pal_hash, rgb, alpha, palette);
+        pixels[i] = *cache
+            .entry((rgb, alpha))
+            .or_insert_with(|| map_colour_to_palette_index(rgb, alpha, palette));
     }
 
     let (new_width, new_height, trim_left, trim_top) = if trim_transparent_pixels {
@@ -321,20 +312,6 @@ where
         original_height: cast::<S>(height, "original_height")?,
         palettized_image: pixels,
     })
-}
-
-fn cached_map_colour_to_palette_index(
-    palette_hash: u64,
-    colour: [u8; 3],
-    alpha: Option<u8>,
-    palette: &[[u8; 3]],
-) -> u8 {
-    let key = (palette_hash, colour, alpha);
-    *COLOUR_INDEX_CACHE
-        .lock()
-        .unwrap()
-        .entry(key)
-        .or_insert_with(|| map_colour_to_palette_index(colour, alpha, palette))
 }
 
 /// Maps an RGB(A) pixel to a palette index.
