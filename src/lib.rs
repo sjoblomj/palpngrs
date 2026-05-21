@@ -249,9 +249,8 @@ where
         img.color(),
         ColorType::Rgba8 | ColorType::La8 | ColorType::Rgba16 | ColorType::La16,
     );
-    let img_data = img.to_rgba8();
 
-    let (width, height) = img_data.dimensions();
+    let (width, height) = (img.width(), img.height());
     info!(
         "Reading image {}. Has alpha channel: {}. Dimensions: 0x{:0>2X} * 0x{:0>2X} ({} * {})",
         png_file_name, has_alpha, width, height, width, height,
@@ -259,18 +258,16 @@ where
 
     let pal_hash = palette_hash(palette);
     let stride = width as usize;
+    let (raw, channels) = if has_alpha {
+        (img.to_rgba8().into_raw(), 4usize)
+    } else {
+        (img.to_rgb8().into_raw(), 3usize)
+    };
     let mut pixels = vec![0u8; stride * height as usize];
-    for (y, row) in img_data.rows().enumerate() {
-        for (x, pixel) in row.enumerate() {
-            let rgb = [pixel[0], pixel[1], pixel[2]];
-            let alpha = if has_alpha {
-                Some(pixel[3])
-            } else {
-                None
-            };
-            let index = cached_map_colour_to_palette_index(pal_hash, rgb, alpha, palette);
-            pixels[y * stride + x] = index;
-        }
+    for (i, chunk) in raw.chunks_exact(channels).enumerate() {
+        let rgb = [chunk[0], chunk[1], chunk[2]];
+        let alpha = if has_alpha { Some(chunk[3]) } else { None };
+        pixels[i] = cached_map_colour_to_palette_index(pal_hash, rgb, alpha, palette);
     }
 
     let (new_width, new_height, trim_left, trim_top) = if trim_transparent_pixels {
