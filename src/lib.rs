@@ -47,6 +47,11 @@ where
 
 /// Given a palettized image and a palette path, this function
 /// will create a PNG RGB image in the specified output_path.
+///
+/// The image is written at its full size with no offset. To preserve the
+/// offsets and original canvas size of an image produced by [`read_png`]
+/// with `trim_transparent_pixels = true`, use
+/// [`palettized_image_with_metadata_to_png`] instead.
 pub fn palettized_image_to_png<T>(
     palettized_image: Vec<u8>,
     output_path: &str,
@@ -63,19 +68,32 @@ where
         y_offset: 0,
         width:  width.clone(),
         height: height.clone(),
-        original_width:  width.clone(),
-        original_height: height.clone(),
+        original_width:  width,
+        original_height: height,
         palettized_image,
     };
+    palettized_image_with_metadata_to_png(image, output_path, &palette, use_transparency)
+}
 
-    let rgb_pixels = draw_image_to_pixel_buffer(image, &palette, use_transparency)?;
-    save_rgb_pixels_to_image_file(
-        rgb_pixels,
-        output_path,
-        use_transparency,
-        to_u32(width,  "width")?,
-        to_u32(height, "height")?,
-    )
+/// Given a [`PalettizedImageWithMetadata`] and a palette, this function
+/// will create a PNG image in the specified output_path sized to the
+/// `original_width` × `original_height` canvas, with the palettized data
+/// placed at `(x_offset, y_offset)`. This is the round-trip counterpart of
+/// [`read_png`] with `trim_transparent_pixels = true`.
+pub fn palettized_image_with_metadata_to_png<O, S>(
+    image: PalettizedImageWithMetadata<O, S>,
+    output_path: &str,
+    palette: &[[u8; 3]],
+    use_transparency: bool,
+) -> Result<(), Error>
+where
+    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug,
+    S: Clone + TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug,
+{
+    let canvas_width  = to_u32(image.original_width.clone(),  "original_width")?;
+    let canvas_height = to_u32(image.original_height.clone(), "original_height")?;
+    let rgb_pixels = draw_image_to_pixel_buffer(image, palette, use_transparency)?;
+    save_rgb_pixels_to_image_file(rgb_pixels, output_path, use_transparency, canvas_width, canvas_height)
 }
 
 
@@ -738,6 +756,76 @@ mod tests {
         );
         let err = result.unwrap_err();
         assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn palettized_image_with_metadata_to_png_round_trips_trimmed_image() -> Result<(), Error> {
+        let palette = greyscale_palette();
+        let src_path = "test_round_trip_src.png";
+        let dst_path = "test_round_trip_dst.png";
+
+        // 5x5 RGBA image: only the centre pixel is opaque (white)
+        let mut img = RgbaImage::new(5, 5);
+        for y in 0..5 {
+            for x in 0..5 {
+                let alpha = if x == 2 && y == 2 { 255 } else { 0 };
+                img.put_pixel(x, y, Rgba([255, 255, 255, alpha]));
+            }
+        }
+        let _ = fs::remove_file(src_path);
+        img.save(src_path).unwrap();
+
+        let trimmed: PalettizedImageWithMetadata<u8, u16> = read_png(src_path, &palette, true)?;
+        assert_eq!(trimmed.width,           1);
+        assert_eq!(trimmed.height,          1);
+        assert_eq!(trimmed.x_offset,        2);
+        assert_eq!(trimmed.y_offset,        2);
+        assert_eq!(trimmed.original_width,  5);
+        assert_eq!(trimmed.original_height, 5);
+
+        palettized_image_with_metadata_to_png(trimmed, dst_path, &palette, true)?;
+
+        // Re-read the output without trimming; the canvas must still be 5x5
+        // with the centre pixel mapped to index 255 (white) and the rest to 0.
+        let result: PalettizedImageWithMetadata<u8, u16> = read_png(dst_path, &palette, false)?;
+        assert_eq!(result.width,  5);
+        assert_eq!(result.height, 5);
+        for y in 0..5usize {
+            for x in 0..5usize {
+                let idx = result.palettized_image[y * 5 + x];
+                if x == 2 && y == 2 {
+                    assert_eq!(idx, 255, "centre pixel should be opaque white");
+                } else {
+                    assert_eq!(idx, 0, "({},{}) should be transparent", x, y);
+                }
+            }
+        }
+
+        fs::remove_file(src_path)?;
+        fs::remove_file(dst_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn palettized_image_to_png_round_trips_untrimmed_image() -> Result<(), Error> {
+        let palette = greyscale_palette();
+        let dst_path = "test_wrapper_round_trip.png";
+
+        // 2x2 palettized image, all pixels mapped to index 100.
+        let pixels = vec![100u8; 4];
+        palettized_image_to_png(pixels, dst_path, palette.clone(), false, 2u32, 2u32)?;
+
+        let result: PalettizedImageWithMetadata<u8, u16> = read_png(dst_path, &palette, false)?;
+        assert_eq!(result.width,    2);
+        assert_eq!(result.height,   2);
+        assert_eq!(result.x_offset, 0);
+        assert_eq!(result.y_offset, 0);
+        for i in 0..4 {
+            assert_eq!(result.palettized_image[i], 100);
+        }
+
+        fs::remove_file(dst_path)?;
+        Ok(())
     }
 
     #[test]

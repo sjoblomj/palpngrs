@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.0] - unreleased
 ### Added
+- `palettized_image_with_metadata_to_png` takes a full `PalettizedImageWithMetadata` and writes it to a PNG sized to the original canvas, so trimmed images produced by `read_png` can be round-tripped in one call.
 - Two new sections to the readme.
 
 ### Changed
