@@ -124,15 +124,27 @@ pub fn save_rgb_pixels_to_image_file(
     width:  u32,
     height: u32,
 ) -> Result<(), Error> {
+    let channels = if use_transparency { 4usize } else { 3usize };
+    let expected_len = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|v| v.checked_mul(channels))
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "buffer size overflows usize"))?;
+    if rgb_pixels.len() != expected_len {
+        return Err(Error::new(ErrorKind::InvalidInput, format!(
+            "rgb_pixels has {} bytes, expected {} ({}x{} * {} channels)",
+            rgb_pixels.len(), expected_len, width, height, channels,
+        )));
+    }
+
     let image = if use_transparency {
         DynamicImage::ImageRgba8(
             ImageBuffer::from_raw(width, height, rgb_pixels)
-                .expect("Failed to create RGBA image"),
+                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "failed to create RGBA image"))?,
         )
     } else {
         DynamicImage::ImageRgb8(
             ImageBuffer::from_raw(width, height, rgb_pixels)
-                .expect("Failed to create RGB image"),
+                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "failed to create RGB image"))?,
         )
     };
     image.save(output_path).map_err(|e| Error::other(e.to_string()))
@@ -812,6 +824,32 @@ mod tests {
 
         fs::remove_file(dst_path)?;
         Ok(())
+    }
+
+    #[test]
+    fn save_rgb_pixels_rejects_mismatched_rgb_buffer() {
+        // Claims 2x2 RGB (= 12 bytes) but only supplies 11.
+        let err = save_rgb_pixels_to_image_file(
+            vec![0u8; 11],
+            "test_save_bad_rgb.png",
+            false,
+            2,
+            2,
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn save_rgb_pixels_rejects_mismatched_rgba_buffer() {
+        // Claims 2x2 RGBA (= 16 bytes) but supplies 15.
+        let err = save_rgb_pixels_to_image_file(
+            vec![0u8; 15],
+            "test_save_bad_rgba.png",
+            true,
+            2,
+            2,
+        ).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
     }
 
     #[test]
