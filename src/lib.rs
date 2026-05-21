@@ -14,8 +14,8 @@ use std::io::{Error, ErrorKind, Read};
 /// RGB value sits at `palette[0]`.
 pub struct PalettizedImageWithMetadata<O, S>
 where
-    O: TryFrom<u32>, // Offset type
-    S: TryFrom<u32>, // Image size type
+    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug, // Offset type
+    S: TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug, // Image size type
 {
     /// x-offset to where the image data starts
     pub x_offset: O,
@@ -262,8 +262,8 @@ pub fn read_png<O, S>(
     trim_transparent_pixels: bool,
 ) -> std::io::Result<PalettizedImageWithMetadata<O, S>>
 where
-    O: TryFrom<u32>,
-    S: TryFrom<u32>,
+    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug,
+    S: TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug,
 {
     if palette.len() < 2 {
         return Err(Error::new(ErrorKind::InvalidInput, format!(
