@@ -258,7 +258,8 @@ where
     );
 
     let pal_hash = palette_hash(palette);
-    let mut pixels_2d = vec![vec![0u8; width as usize]; height as usize];
+    let stride = width as usize;
+    let mut pixels = vec![0u8; stride * height as usize];
     for (y, row) in img_data.rows().enumerate() {
         for (x, pixel) in row.enumerate() {
             let rgb = [pixel[0], pixel[1], pixel[2]];
@@ -268,19 +269,23 @@ where
                 None
             };
             let index = cached_map_colour_to_palette_index(pal_hash, rgb, alpha, palette);
-            pixels_2d[y][x] = index;
+            pixels[y * stride + x] = index;
         }
     }
 
     let (new_width, new_height, trim_left, trim_top) = if trim_transparent_pixels {
-        trim_away_transparency(&pixels_2d, width, height)
+        trim_away_transparency(&pixels, width, height)
     } else {
         (width, height, 0, 0)
     };
 
-    let mut pixels = Vec::with_capacity((new_width * new_height) as usize);
-    for row in pixels_2d.iter().skip(trim_top as usize).take(new_height as usize) {
-        pixels.extend(&row[trim_left as usize .. (trim_left + new_width) as usize]);
+    if trim_left != 0 || trim_top != 0 || new_width != width || new_height != height {
+        let mut trimmed = Vec::with_capacity((new_width as usize) * (new_height as usize));
+        for y in trim_top..trim_top + new_height {
+            let start = (y as usize) * stride + trim_left as usize;
+            trimmed.extend_from_slice(&pixels[start .. start + new_width as usize]);
+        }
+        pixels = trimmed;
     }
 
     Ok(PalettizedImageWithMetadata {
@@ -354,16 +359,17 @@ fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u
     best_index as u8
 }
 
-fn trim_away_transparency(pixels_2d: &[Vec<u8>], width: u32, height: u32) -> (u32, u32, u32, u32) {
+fn trim_away_transparency(pixels: &[u8], width: u32, height: u32) -> (u32, u32, u32, u32) {
     // Determine how many rows/columns to trim from each edge
     let mut trim_top:    u32 = 0;
     let mut trim_bottom: u32 = 0;
     let mut trim_left:   u32 = 0;
     let mut trim_right:  u32 = 0;
+    let stride = width as usize;
 
     // Top
-    for row in pixels_2d {
-        if row.iter().all(|&p| p == 0) {
+    for y in 0..height as usize {
+        if pixels[y * stride .. y * stride + stride].iter().all(|&p| p == 0) {
             trim_top += 1;
         } else {
             break;
@@ -371,8 +377,8 @@ fn trim_away_transparency(pixels_2d: &[Vec<u8>], width: u32, height: u32) -> (u3
     }
 
     // Bottom
-    for row in pixels_2d.iter().rev() {
-        if row.iter().all(|&p| p == 0) {
+    for y in (0..height as usize).rev() {
+        if pixels[y * stride .. y * stride + stride].iter().all(|&p| p == 0) {
             trim_bottom += 1;
         } else {
             break;
@@ -380,8 +386,8 @@ fn trim_away_transparency(pixels_2d: &[Vec<u8>], width: u32, height: u32) -> (u3
     }
 
     // Left
-    for x in 0..width as usize {
-        if pixels_2d.iter().all(|row| row[x] == 0) {
+    for x in 0..stride {
+        if (0..height as usize).all(|y| pixels[y * stride + x] == 0) {
             trim_left += 1;
         } else {
             break;
@@ -389,8 +395,8 @@ fn trim_away_transparency(pixels_2d: &[Vec<u8>], width: u32, height: u32) -> (u3
     }
 
     // Right
-    for x in (0..width as usize).rev() {
-        if pixels_2d.iter().all(|row| row[x] == 0) {
+    for x in (0..stride).rev() {
+        if (0..height as usize).all(|y| pixels[y * stride + x] == 0) {
             trim_right += 1;
         } else {
             break;
