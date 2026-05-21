@@ -97,11 +97,20 @@ where
 }
 
 
-/// Reads a Palette file
+/// Reads a Palette file. Expects exactly 768 bytes (256 RGB entries * 3
+/// bytes); returns [`ErrorKind::InvalidData`] if the file is shorter or
+/// longer than that.
 pub fn read_rgb_palette(pal_path: &str) -> std::io::Result<Vec<[u8; 3]>> {
+    const PALETTE_BYTES: usize = 768; // 256 RGB entries * 3 bytes
     let mut file = File::open(pal_path)?;
-    let mut buffer = [0u8; 768]; // RGB PAL files contain 256 RGB entries (256 * 3 bytes = 768)
-    file.read_exact(&mut buffer)?;
+    let mut buffer = Vec::with_capacity(PALETTE_BYTES);
+    file.read_to_end(&mut buffer)?;
+    if buffer.len() != PALETTE_BYTES {
+        return Err(Error::new(ErrorKind::InvalidData, format!(
+            "palette file {} is {} bytes, expected {} (256 RGB entries * 3 bytes)",
+            pal_path, buffer.len(), PALETTE_BYTES,
+        )));
+    }
 
     Ok(buffer.chunks(3).map(|c| [c[0], c[1], c[2]]).collect())
 }
@@ -825,6 +834,50 @@ mod tests {
         }
 
         fs::remove_file(dst_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn read_rgb_palette_reads_exactly_768_bytes() -> Result<(), Error> {
+        let path = "test_palette_ok.pal";
+        let mut bytes = vec![0u8; 768];
+        for i in 0..256 {
+            bytes[i * 3]     = i as u8;
+            bytes[i * 3 + 1] = (i as u8).wrapping_add(1);
+            bytes[i * 3 + 2] = (i as u8).wrapping_add(2);
+        }
+        fs::write(path, &bytes)?;
+
+        let palette = read_rgb_palette(path)?;
+        assert_eq!(palette.len(), 256);
+        assert_eq!(palette[0],   [0, 1, 2]);
+        assert_eq!(palette[255], [255, 0, 1]);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn read_rgb_palette_rejects_short_file() -> Result<(), Error> {
+        let path = "test_palette_short.pal";
+        fs::write(path, vec![0u8; 767])?;
+
+        let err = read_rgb_palette(path).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+
+        fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn read_rgb_palette_rejects_long_file() -> Result<(), Error> {
+        let path = "test_palette_long.pal";
+        fs::write(path, vec![0u8; 769])?;
+
+        let err = read_rgb_palette(path).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+
+        fs::remove_file(path)?;
         Ok(())
     }
 
