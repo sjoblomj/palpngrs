@@ -13,3 +13,6 @@ keywords = ["graphics"]
 [dependencies]
 image = "0.25"     # For image manipulation (PNG handling)
 log = "0.4"
+
+[dev-dependencies]
+tempfile = "3.27.0"

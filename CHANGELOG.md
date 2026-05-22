@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - Path-taking public functions (`read_png`, `palettized_image_to_png`, `palettized_image_with_metadata_to_png`, `read_rgb_palette`, `save_rgb_pixels_to_image_file`) now take `impl AsRef<Path>` instead of `&str`, so callers can pass `Path`, `PathBuf`, or `OsStr` without going through `to_str().unwrap()`.
 - `palettized_image_to_png` now takes the palette by slice (`&[[u8; 3]]`) instead of an owned `Vec<[u8; 3]>`, matching the inner APIs and avoiding an unnecessary move.
 - `draw_image_to_pixel_buffer` now does its inner-loop index arithmetic in `usize` instead of `u32`, matching the buffer-size calculation and removing a theoretical overflow on pathological canvas sizes.
+- Tests now write their fixtures into per-test `tempfile::TempDir` directories instead of fixed filenames in the process CWD, so partial-failure leftovers, cross-test filename collisions, and stale data between runs are no longer possible. Added `tempfile` as a dev-dependency.
 - Return an error instead of panicking when image dimensions don't fit in the numeric type chosen by the caller.
 - `read_png` now requires the palette to have at least two entries (index 0 plus at least one opaque colour) and returns an error otherwise.
 - Minor stylistic code fixes.
