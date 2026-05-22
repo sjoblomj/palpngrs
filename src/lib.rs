@@ -247,15 +247,20 @@ where
 
     let mut buffer = vec![0u8; buffer_size];
 
-    for y in 0..height {
-        for x in 0..width {
-            let idx = (y * width + x) as usize;
+    let width_us      = width      as usize;
+    let max_width_us  = max_width  as usize;
+    let x_offset_us   = x_offset   as usize;
+    let y_offset_us   = y_offset   as usize;
+
+    for y in 0..height as usize {
+        for x in 0..width_us {
+            let idx = y * width_us + x;
             let palette_index = image.palettized_image[idx] as usize;
             let colour = palette[palette_index];
 
-            let out_x = x + x_offset;
-            let out_y = y + y_offset;
-            let pixel_index = (out_y * max_width + out_x) as usize;
+            let out_x = x + x_offset_us;
+            let out_y = y + y_offset_us;
+            let pixel_index = out_y * max_width_us + out_x;
 
             if use_transparency {
                 let base = pixel_index * 4;
