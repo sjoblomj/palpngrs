@@ -73,7 +73,7 @@ where
 pub fn palettized_image_to_png<T>(
     palettized_image: Vec<u8>,
     output_path: impl AsRef<Path>,
-    palette: Vec<[u8; 3]>,
+    palette: &[[u8; 3]],
     use_transparency: bool,
     width:  T,
     height: T,
@@ -90,7 +90,7 @@ where
         original_height: height,
         palettized_image,
     };
-    palettized_image_with_metadata_to_png(image, output_path, &palette, use_transparency)
+    palettized_image_with_metadata_to_png(image, output_path, palette, use_transparency)
 }
 
 /// Given a [`PalettizedImageWithMetadata`] and a palette, this function
@@ -779,7 +779,7 @@ mod tests {
         let result = palettized_image_to_png(
             vec![0u8; 0],
             "test_overflow_not_created.png",
-            palette,
+            &palette,
             false,
             too_big,
             1u64,
@@ -843,7 +843,7 @@ mod tests {
 
         // 2x2 palettized image, all pixels mapped to index 100.
         let pixels = vec![100u8; 4];
-        palettized_image_to_png(pixels, dst_path, palette.clone(), false, 2u32, 2u32)?;
+        palettized_image_to_png(pixels, dst_path, &palette, false, 2u32, 2u32)?;
 
         let result: PalettizedImageWithMetadata<u8, u16> = read_png(dst_path, &palette, false)?;
         assert_eq!(result.width,    2);
