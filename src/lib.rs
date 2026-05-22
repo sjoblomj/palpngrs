@@ -63,8 +63,10 @@ where
     }
 }
 
-/// Given a palettized image and a palette path, this function
-/// will create a PNG RGB image in the specified output_path.
+/// Given a palettized image and a palette, this function will create a PNG
+/// image in the specified `output_path`. When `use_transparency` is `true`
+/// the output is RGBA (palette index `0` is written with alpha `0`,
+/// everything else with alpha `255`); when `false` it is RGB.
 ///
 /// The image is written at its full size with no offset. To preserve the
 /// offsets and original canvas size of an image produced by [`read_png`]
