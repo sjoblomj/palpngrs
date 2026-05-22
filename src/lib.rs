@@ -12,6 +12,8 @@ use std::io::{Error, ErrorKind, Read};
 /// [`read_png`] and [`draw_image_to_pixel_buffer`] treat index `0` as
 /// "transparent" and never use it for an opaque colour, regardless of what
 /// RGB value sits at `palette[0]`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct PalettizedImageWithMetadata<O, S>
 where
     O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug, // Offset type
@@ -32,6 +34,32 @@ where
     /// Palettized image, i.e. every element is an index to an external palette.
     /// This is thus not an RGB pixel. Index `0` denotes a transparent pixel.
     pub palettized_image: Vec<u8>,
+}
+
+impl<O, S> PalettizedImageWithMetadata<O, S>
+where
+    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug,
+    S: TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug,
+{
+    /// Constructs a `PalettizedImageWithMetadata` from its fields. Use this
+    /// instead of struct-literal syntax: the struct is `#[non_exhaustive]`,
+    /// so fields may be added in future without a SemVer break.
+    pub fn new(
+        x_offset: O,
+        y_offset: O,
+        width:           S,
+        height:          S,
+        original_width:  S,
+        original_height: S,
+        palettized_image: Vec<u8>,
+    ) -> Self {
+        Self {
+            x_offset, y_offset,
+            width, height,
+            original_width, original_height,
+            palettized_image,
+        }
+    }
 }
 
 /// Given a palettized image and a palette path, this function
@@ -824,6 +852,23 @@ mod tests {
 
         fs::remove_file(dst_path)?;
         Ok(())
+    }
+
+    #[test]
+    fn palettized_image_with_metadata_constructor_and_derives() {
+        let a: PalettizedImageWithMetadata<u8, u16> =
+            PalettizedImageWithMetadata::new(1, 2, 3, 4, 5, 6, vec![7, 8, 9]);
+        let b = a.clone();
+        assert_eq!(a, b);
+        assert_eq!(a.x_offset,        1);
+        assert_eq!(a.y_offset,        2);
+        assert_eq!(a.width,           3);
+        assert_eq!(a.height,          4);
+        assert_eq!(a.original_width,  5);
+        assert_eq!(a.original_height, 6);
+        assert_eq!(a.palettized_image, vec![7, 8, 9]);
+        // Debug impl exists (just exercise it; no specific format guaranteed)
+        let _ = format!("{:?}", a);
     }
 
     #[test]
