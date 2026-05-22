@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Validate inputs to `draw_image_to_pixel_buffer` and return errors for mismatched image size, out-of-range palette indices, offsets outside the canvas, or an empty palette, instead of panicking.
 - Validate inputs to `save_rgb_pixels_to_image_file` and return `ErrorKind::InvalidInput` when the pixel buffer length does not match `width * height * channels`, instead of panicking.
 - Tightened the bounds on `PalettizedImageWithMetadata` and `read_png` to require `TryInto<u32>` on the offset and size types, matching `draw_image_to_pixel_buffer` so that every constructed value is guaranteed to round-trip through the draw and save paths.
+- Path-taking public functions (`read_png`, `palettized_image_to_png`, `palettized_image_with_metadata_to_png`, `read_rgb_palette`, `save_rgb_pixels_to_image_file`) now take `impl AsRef<Path>` instead of `&str`, so callers can pass `Path`, `PathBuf`, or `OsStr` without going through `to_str().unwrap()`.
 - Return an error instead of panicking when image dimensions don't fit in the numeric type chosen by the caller.
 - `read_png` now requires the palette to have at least two entries (index 0 plus at least one opaque colour) and returns an error otherwise.
 - Minor stylistic code fixes.

@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
+use std::path::Path;
 
 /// A palettized image plus the offsets and dimensions needed to place it
 /// inside its original canvas.
@@ -71,7 +72,7 @@ where
 /// [`palettized_image_with_metadata_to_png`] instead.
 pub fn palettized_image_to_png<T>(
     palettized_image: Vec<u8>,
-    output_path: &str,
+    output_path: impl AsRef<Path>,
     palette: Vec<[u8; 3]>,
     use_transparency: bool,
     width:  T,
@@ -99,7 +100,7 @@ where
 /// [`read_png`] with `trim_transparent_pixels = true`.
 pub fn palettized_image_with_metadata_to_png<O, S>(
     image: PalettizedImageWithMetadata<O, S>,
-    output_path: &str,
+    output_path: impl AsRef<Path>,
     palette: &[[u8; 3]],
     use_transparency: bool,
 ) -> Result<(), Error>
@@ -117,15 +118,16 @@ where
 /// Reads a Palette file. Expects exactly 768 bytes (256 RGB entries * 3
 /// bytes); returns [`ErrorKind::InvalidData`] if the file is shorter or
 /// longer than that.
-pub fn read_rgb_palette(pal_path: &str) -> std::io::Result<Vec<[u8; 3]>> {
+pub fn read_rgb_palette(pal_path: impl AsRef<Path>) -> std::io::Result<Vec<[u8; 3]>> {
     const PALETTE_BYTES: usize = 768; // 256 RGB entries * 3 bytes
+    let pal_path = pal_path.as_ref();
     let mut file = File::open(pal_path)?;
     let mut buffer = Vec::with_capacity(PALETTE_BYTES);
     file.read_to_end(&mut buffer)?;
     if buffer.len() != PALETTE_BYTES {
         return Err(Error::new(ErrorKind::InvalidData, format!(
             "palette file {} is {} bytes, expected {} (256 RGB entries * 3 bytes)",
-            pal_path, buffer.len(), PALETTE_BYTES,
+            pal_path.display(), buffer.len(), PALETTE_BYTES,
         )));
     }
 
@@ -147,7 +149,7 @@ pub fn greyscale_palette() -> Vec<[u8; 3]> {
 /// Saves the given RGB pixel buffer to the given output path.
 pub fn save_rgb_pixels_to_image_file(
     rgb_pixels: Vec<u8>,
-    output_path: &str,
+    output_path: impl AsRef<Path>,
     use_transparency: bool,
     width:  u32,
     height: u32,
@@ -285,7 +287,7 @@ where
 /// plus at least one opaque colour to match against); otherwise an error of
 /// kind [`ErrorKind::InvalidInput`] is returned.
 pub fn read_png<O, S>(
-    png_file_name: &str,
+    png_file_name: impl AsRef<Path>,
     palette: &[[u8; 3]],
     trim_transparent_pixels: bool,
 ) -> std::io::Result<PalettizedImageWithMetadata<O, S>>
@@ -299,6 +301,7 @@ where
             palette.len(),
         )));
     }
+    let png_file_name = png_file_name.as_ref();
     let img = image::open(png_file_name)
         .map_err(|e| Error::other(e.to_string()))?;
     let has_alpha = matches!(
@@ -309,7 +312,7 @@ where
     let (width, height) = (img.width(), img.height());
     info!(
         "Reading image {}. Has alpha channel: {}. Dimensions: 0x{:0>2X} * 0x{:0>2X} ({} * {})",
-        png_file_name, has_alpha, width, height, width, height,
+        png_file_name.display(), has_alpha, width, height, width, height,
     );
 
     let stride = width as usize;
@@ -490,6 +493,7 @@ mod tests {
     use super::*;
     use image::{Rgb, RgbImage, Rgba, RgbaImage};
     use std::fs;
+    use std::path::PathBuf;
 
     fn save_test_png_rgb(path: &str, colour: [u8; 3], width: u32, height: u32) {
         let mut img = RgbImage::new(width, height);
@@ -851,6 +855,22 @@ mod tests {
         }
 
         fs::remove_file(dst_path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn public_api_accepts_pathbuf() -> Result<(), Error> {
+        let palette = greyscale_palette();
+        let src_path = PathBuf::from("test_pathbuf_input.png");
+        save_test_png_rgb(src_path.to_str().unwrap(), [42, 42, 42], 1, 1);
+
+        // read_png and palettized_image_with_metadata_to_png with PathBuf
+        let image: PalettizedImageWithMetadata<u8, u16> = read_png(&src_path, &palette, false)?;
+        let dst_path = PathBuf::from("test_pathbuf_output.png");
+        palettized_image_with_metadata_to_png(image, &dst_path, &palette, false)?;
+
+        fs::remove_file(&src_path)?;
+        fs::remove_file(&dst_path)?;
         Ok(())
     }
 
