@@ -33,6 +33,7 @@ All notable changes to this project will be documented in this file.
 - Clarified the "palette index 0 is reserved for transparent" contract on `PalettizedImageWithMetadata` and `draw_image_to_pixel_buffer`: index 0 is treated as transparent on the draw side only when `use_transparency = true`. With `use_transparency = false`, `palette[0]` is drawn as an opaque colour like any other entry. `read_png` continues to preserve the reservation symmetrically on the read side, so its output round-trips safely under either setting.
 - Demoted the "Image is too small to trim" messages emitted by `trim_away_transparency` from `error!` to `warn!`: a fully-transparent image is a documented and valid outcome, not a programmatic error.
 - When `read_png` trims away a fully-transparent image, `x_offset` and `y_offset` are now `0` instead of the original image's width and height. The previous values were a side effect of how the trim scans terminate and had no useful semantic interpretation for an empty image.
+- Filled in `Cargo.toml` metadata.
 - Return an error instead of panicking when image dimensions don't fit in the numeric type chosen by the caller.
 - `read_png` now requires the palette to have at least two entries (index 0 plus at least one opaque colour) and returns an error otherwise.
 - Minor stylistic code fixes.

@@ -18,7 +18,7 @@ enabled, index `0` becomes a transparent pixel and all other
 indices become opaque.
 
 ## Building
-Requires Rust 1.80 or newer (for `std::sync::LazyLock`).
+Requires Rust 1.85 or newer (for the 2024 edition).
 
 ```sh
 cargo build              # debug build
