@@ -9,10 +9,18 @@ use std::path::Path;
 /// A palettized image plus the offsets and dimensions needed to place it
 /// inside its original canvas.
 ///
-/// Palette index `0` is reserved for the transparent colour. Both
-/// [`read_png`] and [`draw_image_to_pixel_buffer`] treat index `0` as
-/// "transparent" and never use it for an opaque colour, regardless of what
-/// RGB value sits at `palette[0]`.
+/// Palette index `0` has a special meaning only in combination with the
+/// `use_transparency` flag used by the draw / write functions:
+///
+/// * [`read_png`] always preserves the reservation: fully-transparent input
+///   pixels are written as `0`, and opaque input pixels are never mapped to
+///   `0` (even if `palette[0]` is the closest RGB match). The output of
+///   `read_png` is therefore safe to draw under either setting.
+/// * [`draw_image_to_pixel_buffer`] (and [`palettized_image_to_png`] /
+///   [`palettized_image_with_metadata_to_png`], which wrap it) treat index
+///   `0` as transparent **only when `use_transparency = true`**. When
+///   `use_transparency = false`, index `0` has no special meaning and
+///   `palette[0]` is drawn as an opaque colour like any other entry.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct PalettizedImageWithMetadata<O, S>
@@ -182,13 +190,16 @@ pub fn save_rgb_pixels_to_image_file(
     image.save(output_path).map_err(|e| Error::other(e.to_string()))
 }
 
-/// Draws a palettized image into an RGB pixel buffer (Vec<u8>).
+/// Draws a palettized image into an RGB(A) pixel buffer (`Vec<u8>`).
 /// Uses the given palette for colour lookups.
 ///
-/// When `use_transparency` is `true`, pixels with palette index `0` are
-/// written with alpha `0` (transparent) and all other indices with alpha
-/// `255` (opaque). Palette index `0` is reserved for the transparent
-/// colour; see [`PalettizedImageWithMetadata`].
+/// When `use_transparency` is `true`, the output is RGBA: pixels with
+/// palette index `0` are written with alpha `0` (transparent) and all other
+/// indices with alpha `255` (opaque). When `use_transparency` is `false`,
+/// the output is RGB and index `0` is treated like any other entry —
+/// `palette[0]` is drawn as an opaque colour. See
+/// [`PalettizedImageWithMetadata`] for the full discussion of how index `0`
+/// is reserved on the read side and conditionally on the write side.
 pub fn draw_image_to_pixel_buffer<O, S>(
     image: PalettizedImageWithMetadata<O, S>,
     palette: &[[u8; 3]],
