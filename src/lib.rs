@@ -1,5 +1,5 @@
 use image::{ColorType, DynamicImage, ImageBuffer};
-use log::{debug, error, info, warn};
+use log::{debug, info, warn};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
@@ -508,14 +508,22 @@ fn trim_away_transparency(pixels: &[u8], width: u32, height: u32) -> (u32, u32, 
     let new_width = if width > trim_left + trim_right {
         width - trim_left - trim_right
     } else {
-        error!("Image is too small to trim. Setting width to 0");
+        warn!("Image is fully transparent along the horizontal axis; setting width to 0");
         0
     };
     let new_height = if height > trim_top + trim_bottom {
         height - trim_top - trim_bottom
     } else {
-        error!("Image is too small to trim. Setting height to 0");
+        warn!("Image is fully transparent along the vertical axis; setting height to 0");
         0
+    };
+
+    // If the trimmed image is empty, the offsets are semantically meaningless;
+    // collapse them to (0, 0) instead of returning the full image dimensions.
+    let (trim_left, trim_top) = if new_width == 0 || new_height == 0 {
+        (0, 0)
+    } else {
+        (trim_left, trim_top)
     };
 
     debug!(
@@ -653,6 +661,12 @@ mod tests {
         let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, true)?;
 
         assert_eq!(trimmed_image.palettized_image.len(), 0);
+        assert_eq!(trimmed_image.width,           0);
+        assert_eq!(trimmed_image.height,          0);
+        assert_eq!(trimmed_image.x_offset,        0);
+        assert_eq!(trimmed_image.y_offset,        0);
+        assert_eq!(trimmed_image.original_width,  1);
+        assert_eq!(trimmed_image.original_height, 1);
         Ok(())
     }
 
