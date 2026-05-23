@@ -143,8 +143,8 @@ pub fn palettized_image_with_metadata_to_png<O: Coord, S: Coord>(
 ) -> Result<(), Error> {
     let canvas_width  = to_u32(image.original_width,  "original_width")?;
     let canvas_height = to_u32(image.original_height, "original_height")?;
-    let rgb_pixels = draw_image_to_pixel_buffer(image, palette, use_transparency)?;
-    save_rgb_pixels_to_image_file(rgb_pixels, output_path, use_transparency, canvas_width, canvas_height)
+    let pixels = draw_image_to_pixel_buffer(image, palette, use_transparency)?;
+    save_pixels_to_image_file(pixels, output_path, use_transparency, canvas_width, canvas_height)
 }
 
 
@@ -179,9 +179,13 @@ pub fn greyscale_palette() -> Vec<[u8; 3]> {
 }
 
 
-/// Saves the given RGB pixel buffer to the given output path.
-pub fn save_rgb_pixels_to_image_file(
-    rgb_pixels: Vec<u8>,
+/// Saves the given pixel buffer to the given output path. When
+/// `use_transparency` is `true` the buffer is interpreted as RGBA (4
+/// bytes per pixel); when `false` it is interpreted as RGB (3 bytes per
+/// pixel). Returns [`ErrorKind::InvalidInput`] if the buffer length does
+/// not match `width * height * channels`.
+pub fn save_pixels_to_image_file(
+    pixels: Vec<u8>,
     output_path: impl AsRef<Path>,
     use_transparency: bool,
     width:  u32,
@@ -192,21 +196,21 @@ pub fn save_rgb_pixels_to_image_file(
         .checked_mul(height as usize)
         .and_then(|v| v.checked_mul(channels))
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "buffer size overflows usize"))?;
-    if rgb_pixels.len() != expected_len {
+    if pixels.len() != expected_len {
         return Err(Error::new(ErrorKind::InvalidInput, format!(
-            "rgb_pixels has {} bytes, expected {} ({}x{} * {} channels)",
-            rgb_pixels.len(), expected_len, width, height, channels,
+            "pixels has {} bytes, expected {} ({}x{} * {} channels)",
+            pixels.len(), expected_len, width, height, channels,
         )));
     }
 
     let image = if use_transparency {
         DynamicImage::ImageRgba8(
-            ImageBuffer::from_raw(width, height, rgb_pixels)
+            ImageBuffer::from_raw(width, height, pixels)
                 .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "failed to create RGBA image"))?,
         )
     } else {
         DynamicImage::ImageRgb8(
-            ImageBuffer::from_raw(width, height, rgb_pixels)
+            ImageBuffer::from_raw(width, height, pixels)
                 .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "failed to create RGB image"))?,
         )
     };
@@ -969,9 +973,9 @@ mod tests {
     }
 
     #[test]
-    fn save_rgb_pixels_rejects_mismatched_rgb_buffer() {
+    fn save_pixels_rejects_mismatched_rgb_buffer() {
         // Claims 2x2 RGB (= 12 bytes) but only supplies 11.
-        let err = save_rgb_pixels_to_image_file(
+        let err = save_pixels_to_image_file(
             vec![0u8; 11],
             "test_save_bad_rgb.png",
             false,
@@ -982,9 +986,9 @@ mod tests {
     }
 
     #[test]
-    fn save_rgb_pixels_rejects_mismatched_rgba_buffer() {
+    fn save_pixels_rejects_mismatched_rgba_buffer() {
         // Claims 2x2 RGBA (= 16 bytes) but supplies 15.
-        let err = save_rgb_pixels_to_image_file(
+        let err = save_pixels_to_image_file(
             vec![0u8; 15],
             "test_save_bad_rgba.png",
             true,
