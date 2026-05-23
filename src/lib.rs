@@ -300,6 +300,16 @@ where
 /// pixels are mapped non-exactly, a single summary line is emitted at `warn`
 /// level reporting the number of unique non-exact colours and the maximum
 /// squared distance.
+///
+/// # Resource use on untrusted input
+///
+/// This function trusts the dimensions of the input PNG and will allocate
+/// buffers proportional to `width × height`. The PNG format permits
+/// dimensions up to `2^31 − 1` per axis, so a maliciously crafted PNG can
+/// request very large allocations (e.g. a 65535×65535 RGBA decode is on the
+/// order of 4 GiB). Callers handling untrusted input should pre-validate the
+/// file's dimensions (for instance via `image::image_dimensions`) or impose
+/// their own size cap before calling this function.
 pub fn read_png<O, S>(
     png_file_name: impl AsRef<Path>,
     palette: &[[u8; 3]],
