@@ -17,6 +17,11 @@ closest RGB match). When drawing back to a PNG with transparency
 enabled, index `0` becomes a transparent pixel and all other
 indices become opaque.
 
+When drawing without transparency, index `0` is drawn as the
+opaque colour `palette[0]`. To read such a PNG back, pass
+`Palette0Pixels::Transparent` to `read_png`: opaque pixels that
+exactly match `palette[0]` are then mapped to `0` again.
+
 ## Building
 Requires Rust 1.85 or newer (for the 2024 edition).
 

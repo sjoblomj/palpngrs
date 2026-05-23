@@ -111,7 +111,10 @@ impl<T: Coord> Size<T> {
 /// * [`read_png`] always preserves the reservation: fully-transparent input
 ///   pixels are written as `0`, and opaque input pixels are never mapped to
 ///   `0` (even if `palette[0]` is the closest RGB match). The output of
-///   `read_png` is therefore safe to draw under either setting.
+///   `read_png` is therefore safe to draw under either setting. To read
+///   back a PNG that was drawn with `use_transparency = false`, pass
+///   [`Palette0Pixels::Transparent`] so that pixels drawn as `palette[0]`
+///   become index `0` again.
 /// * [`draw_image_to_pixel_buffer`] (and [`palettized_image_to_png`] /
 ///   [`palettized_image_with_metadata_to_png`], which wrap it) treat index
 ///   `0` as transparent **only when `use_transparency = true`**. When
@@ -384,6 +387,24 @@ pub fn draw_image_to_pixel_buffer<O: Coord, S: Coord>(
     Ok(buffer)
 }
 
+/// How [`read_png`] treats opaque pixels whose colour exactly matches
+/// `palette[0]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Palette0Pixels {
+    /// Index `0` is reserved for fully-transparent pixels. Opaque pixels are
+    /// mapped to the nearest of the other palette entries, even when they
+    /// exactly match `palette[0]`.
+    #[default]
+    Opaque,
+    /// Opaque pixels whose colour exactly matches `palette[0]` are treated as
+    /// transparent and mapped to index `0`. All other opaque pixels are
+    /// mapped to the nearest of the other palette entries, as with
+    /// [`Palette0Pixels::Opaque`]. Use this to read back a PNG that was drawn
+    /// with `use_transparency = false`, where transparent pixels were written
+    /// as opaque `palette[0]`.
+    Transparent,
+}
+
 /// Reads a PNG file and creates an PalettizedImageWithMetadata by doing colour
 /// lookups using the given palette. If trim_transparent_pixels is set to true,
 /// any rows or columns where all pixels are transparent will be trimmed away,
@@ -395,6 +416,12 @@ pub fn draw_image_to_pixel_buffer<O: Coord, S: Coord>(
 /// therefore contain at least two entries (one for the transparent colour
 /// plus at least one opaque colour to match against); otherwise
 /// [`Error::PaletteTooShort`] is returned.
+///
+/// The exception is when `palette0_pixels` is
+/// [`Palette0Pixels::Transparent`]: opaque pixels that exactly match
+/// `palette[0]` are then mapped to `0` as well, and are trimmed away like
+/// any other transparent pixel. This makes it possible to round-trip images
+/// drawn with `use_transparency = false`.
 ///
 /// Nearest-colour matching uses plain squared Euclidean distance on the raw
 /// 8-bit sRGB channels. This is not perceptually uniform; for photographic
@@ -416,6 +443,7 @@ pub fn read_png<O: Coord, S: Coord>(
     png_file_name: impl AsRef<Path>,
     palette: &[[u8; 3]],
     trim_transparent_pixels: bool,
+    palette0_pixels: Palette0Pixels,
 ) -> Result<PalettizedImageWithMetadata<O, S>, Error> {
     if palette.len() < 2 {
         return Err(Error::PaletteTooShort { actual: palette.len(), required: 2 });
@@ -447,7 +475,7 @@ pub fn read_png<O: Coord, S: Coord>(
         let rgb = [chunk[0], chunk[1], chunk[2]];
         let alpha = if has_alpha { Some(chunk[3]) } else { None };
         pixels[i] = *cache.entry((rgb, alpha)).or_insert_with(|| {
-            let (idx, dist) = map_colour_to_palette_index(rgb, alpha, palette);
+            let (idx, dist) = map_colour_to_palette_index(rgb, alpha, palette, palette0_pixels);
             if dist != 0 {
                 non_exact_unique += 1;
                 if dist > max_distance { max_distance = dist; }
@@ -494,6 +522,8 @@ pub fn read_png<O: Coord, S: Coord>(
 /// pixels are always mapped to 0, and opaque pixels are never mapped to 0
 /// (even if `palette[0]` happens to be the closest RGB match). This avoids
 /// opaque pixels round-tripping as transparent in `draw_image_to_pixel_buffer`.
+/// The exception is [`Palette0Pixels::Transparent`], where opaque pixels that
+/// exactly match `palette[0]` are mapped to 0.
 ///
 /// Precondition: `palette.len() >= 2`. Callers must validate this; the
 /// nearest-colour search skips index 0, so a palette with fewer than two
@@ -508,9 +538,17 @@ pub fn read_png<O: Coord, S: Coord>(
 /// Returns `(palette_index, squared_distance)`. The distance is `0` on an
 /// exact match. For transparent pixels (`alpha == Some(0)`) the returned
 /// index is `0` and the distance is `0`.
-fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u8; 3]]) -> (u8, u32) {
+fn map_colour_to_palette_index(
+    colour: [u8; 3],
+    alpha: Option<u8>,
+    palette: &[[u8; 3]],
+    palette0_pixels: Palette0Pixels,
+) -> (u8, u32) {
     if alpha == Some(0) {
         return (0, 0); // Transparent
+    }
+    if palette0_pixels == Palette0Pixels::Transparent && colour == palette[0] {
+        return (0, 0); // Drawn as palette[0], i.e. transparent
     }
     if alpha != Some(255) && alpha.is_some() {
         warn!(
@@ -670,7 +708,7 @@ mod tests {
         let (_dir_rgb, path_rgb) = tmp_path("test_rgb.png");
         save_test_png_rgb(&path_rgb, [100, 100, 100], 8, 8);
 
-        let result_rgb: PalettizedImageWithMetadata<u8, u16> = read_png(&path_rgb, &palette, true)?;
+        let result_rgb: PalettizedImageWithMetadata<u8, u16> = read_png(&path_rgb, &palette, true, Palette0Pixels::Opaque)?;
         for i in 0..result_rgb.palettized_image.len() {
             assert_eq!(result_rgb.palettized_image[i], 100);
         }
@@ -679,7 +717,7 @@ mod tests {
         let (_dir_rgba, path_rgba) = tmp_path("test_rgba.png");
         save_test_png_rgba(&path_rgba, [100, 100, 100, 255], 8, 8);
 
-        let result_rgba: PalettizedImageWithMetadata<u8, u16> = read_png(&path_rgba, &palette, true)?;
+        let result_rgba: PalettizedImageWithMetadata<u8, u16> = read_png(&path_rgba, &palette, true, Palette0Pixels::Opaque)?;
         for i in 0..result_rgba.palettized_image.len() {
             assert_eq!(result_rgba.palettized_image[i], 100);
         }
@@ -692,7 +730,7 @@ mod tests {
         let (_dir, path_rgba) = tmp_path("test_rgba_alpha.png");
         save_test_png_rgba(&path_rgba, [100, 100, 100, 71], 8, 8);
 
-        let trimmed_image: PalettizedImageWithMetadata<u8, u8> = read_png(&path_rgba, &palette, true)?;
+        let trimmed_image: PalettizedImageWithMetadata<u8, u8> = read_png(&path_rgba, &palette, true, Palette0Pixels::Opaque)?;
         for i in 0..trimmed_image.palettized_image.len() {
             assert_eq!(trimmed_image.palettized_image[i], 100);
         }
@@ -714,7 +752,7 @@ mod tests {
         }
         img.save(&path).unwrap();
 
-        let trimmed_image: PalettizedImageWithMetadata<u8, u8> = read_png(&path, &palette, true)?;
+        let trimmed_image: PalettizedImageWithMetadata<u8, u8> = read_png(&path, &palette, true, Palette0Pixels::Opaque)?;
         assert_eq!(trimmed_image.width,    1);
         assert_eq!(trimmed_image.height,   1);
         assert_eq!(trimmed_image.x_offset, 1);
@@ -729,7 +767,7 @@ mod tests {
         let (_dir, path) = tmp_path("test_colour.png");
         save_test_png_rgb(&path, [100, 100, 101], 1, 1);
 
-        let result: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, false)?;
+        let result: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, false, Palette0Pixels::Opaque)?;
 
         assert_eq!(result.palettized_image[0], 100); // Closest match
         Ok(())
@@ -741,7 +779,7 @@ mod tests {
         let (_dir, path) = tmp_path("test_transparency.png");
         save_test_png_rgba(&path, [0, 0, 0, 0], 1, 1); // Fully transparent
 
-        let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, true)?;
+        let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, true, Palette0Pixels::Opaque)?;
 
         assert_eq!(trimmed_image.palettized_image.len(), 0);
         assert_eq!(trimmed_image.width,           0);
@@ -759,7 +797,7 @@ mod tests {
         let (_dir, path) = tmp_path("test_transparency_without_trimming.png");
         save_test_png_rgba(&path, [0, 0, 0, 0], 1, 1); // Fully transparent
 
-        let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, false)?;
+        let trimmed_image: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, false, Palette0Pixels::Opaque)?;
 
         assert_eq!(trimmed_image.palettized_image.len(), 1);
         Ok(())
@@ -775,7 +813,7 @@ mod tests {
         }
         img.save(&path).unwrap();
 
-        let result: PalettizedImageWithMetadata<u8, u8> = read_png(&path, &palette, true)?;
+        let result: PalettizedImageWithMetadata<u8, u8> = read_png(&path, &palette, true, Palette0Pixels::Opaque)?;
         assert_eq!(result.width  + result.x_offset, 255);
         assert_eq!(result.height + result.y_offset, 255);
         Ok(())
@@ -791,7 +829,7 @@ mod tests {
         }
         img.save(&path).unwrap();
 
-        let result: Result<PalettizedImageWithMetadata<u8, u8>, Error> = read_png(&path, &palette, false);
+        let result: Result<PalettizedImageWithMetadata<u8, u8>, Error> = read_png(&path, &palette, false, Palette0Pixels::Opaque);
         assert!(result.is_err());
         Ok(())
     }
@@ -808,7 +846,7 @@ mod tests {
         img.put_pixel(260, 0, Rgba([100, 100, 100, 255]));
         img.save(&path).unwrap();
 
-        let result: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(&path, &palette, true);
+        let result: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(&path, &palette, true, Palette0Pixels::Opaque);
         assert!(result.is_err());
         Ok(())
     }
@@ -825,8 +863,8 @@ mod tests {
         let mut palette_b = vec![[0u8; 3]; 256];
         palette_b[9] = [10, 20, 30];
 
-        let result_a: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette_a, false)?;
-        let result_b: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette_b, false)?;
+        let result_a: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette_a, false, Palette0Pixels::Opaque)?;
+        let result_b: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette_b, false, Palette0Pixels::Opaque)?;
 
         assert_eq!(result_a.palettized_image[0], 5);
         assert_eq!(result_b.palettized_image[0], 9);
@@ -845,10 +883,64 @@ mod tests {
         palette[0] = [255, 255, 255];
         palette[7] = [254, 254, 254];
 
-        let result: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, false)?;
+        let result: PalettizedImageWithMetadata<u8, u16> = read_png(&path, &palette, false, Palette0Pixels::Opaque)?;
         assert_ne!(result.palettized_image[0], 0,
             "opaque pixel must not be mapped to the reserved transparent index");
         assert_eq!(result.palettized_image[0], 7);
+        Ok(())
+    }
+
+    #[test]
+    fn opaque_palette0_pixel_maps_to_index_zero_when_requested() -> Result<(), Error> {
+        let dir = tempdir()?;
+        let exact_path = dir.path().join("test_palette0_exact.png");
+        let near_path  = dir.path().join("test_palette0_near.png");
+        save_test_png_rgb(&exact_path, [0, 0, 0], 1, 1);
+        save_test_png_rgb(&near_path,  [1, 1, 1], 1, 1);
+
+        let mut palette = vec![[255u8; 3]; 256];
+        palette[0] = [0, 0, 0];
+        palette[7] = [2, 2, 2];
+
+        let exact: PalettizedImageWithMetadata<u8, u16> =
+            read_png(&exact_path, &palette, false, Palette0Pixels::Transparent)?;
+        assert_eq!(exact.palettized_image[0], 0);
+
+        // Only exact matches are treated as transparent; a near match still
+        // maps to the nearest of the other entries.
+        let near: PalettizedImageWithMetadata<u8, u16> =
+            read_png(&near_path, &palette, false, Palette0Pixels::Transparent)?;
+        assert_eq!(near.palettized_image[0], 7);
+        Ok(())
+    }
+
+    #[test]
+    fn round_trip_without_transparency_requires_palette0_transparent() -> Result<(), Error> {
+        let dir = tempdir()?;
+        let path = dir.path().join("test_round_trip_opaque.png");
+
+        let mut palette = vec![[255u8; 3]; 256];
+        palette[0] = [0, 0, 0];
+        palette[1] = [1, 1, 1];
+        palette[9] = [200, 100, 50];
+
+        // 1x1 image at (2, 2) on a 5x5 canvas, drawn without transparency so
+        // the background becomes opaque palette[0].
+        let image = PalettizedImageWithMetadata::<u8, u16>::new(
+            Offset::new(2, 2), Size::new(1, 1), Size::new(5, 5), vec![9],
+        );
+        palettized_image_with_metadata_to_png(image.clone(), &path, &palette, false)?;
+
+        let read_back: PalettizedImageWithMetadata<u8, u16> =
+            read_png(&path, &palette, true, Palette0Pixels::Transparent)?;
+        assert_eq!(read_back, image);
+
+        // With the default, the background is mapped to palette[1] and
+        // nothing is trimmed.
+        let default: PalettizedImageWithMetadata<u8, u16> =
+            read_png(&path, &palette, true, Palette0Pixels::Opaque)?;
+        assert_eq!(default.width, 5);
+        assert_eq!(default.palettized_image[0], 1);
         Ok(())
     }
 
@@ -956,7 +1048,7 @@ mod tests {
         }
         img.save(&src_path).unwrap();
 
-        let trimmed: PalettizedImageWithMetadata<u8, u16> = read_png(&src_path, &palette, true)?;
+        let trimmed: PalettizedImageWithMetadata<u8, u16> = read_png(&src_path, &palette, true, Palette0Pixels::Opaque)?;
         assert_eq!(trimmed.width,           1);
         assert_eq!(trimmed.height,          1);
         assert_eq!(trimmed.x_offset,        2);
@@ -968,7 +1060,7 @@ mod tests {
 
         // Re-read the output without trimming; the canvas must still be 5x5
         // with the centre pixel mapped to index 255 (white) and the rest to 0.
-        let result: PalettizedImageWithMetadata<u8, u16> = read_png(&dst_path, &palette, false)?;
+        let result: PalettizedImageWithMetadata<u8, u16> = read_png(&dst_path, &palette, false, Palette0Pixels::Opaque)?;
         assert_eq!(result.width,  5);
         assert_eq!(result.height, 5);
         for y in 0..5usize {
@@ -994,7 +1086,7 @@ mod tests {
         let pixels = vec![100u8; 4];
         palettized_image_to_png(pixels, &dst_path, &palette, false, 2u32, 2u32)?;
 
-        let result: PalettizedImageWithMetadata<u8, u16> = read_png(&dst_path, &palette, false)?;
+        let result: PalettizedImageWithMetadata<u8, u16> = read_png(&dst_path, &palette, false, Palette0Pixels::Opaque)?;
         assert_eq!(result.width,    2);
         assert_eq!(result.height,   2);
         assert_eq!(result.x_offset, 0);
@@ -1014,7 +1106,7 @@ mod tests {
         save_test_png_rgb(&src_path, [42, 42, 42], 1, 1);
 
         // read_png and palettized_image_with_metadata_to_png with PathBuf
-        let image: PalettizedImageWithMetadata<u8, u16> = read_png(&src_path, &palette, false)?;
+        let image: PalettizedImageWithMetadata<u8, u16> = read_png(&src_path, &palette, false, Palette0Pixels::Opaque)?;
         let dst_path: PathBuf = dir.path().join("test_pathbuf_output.png");
         palettized_image_with_metadata_to_png(image, &dst_path, &palette, false)?;
 
@@ -1122,14 +1214,14 @@ mod tests {
         save_test_png_rgb(&path, [100, 100, 100], 1, 1);
 
         let empty: Vec<[u8; 3]> = Vec::new();
-        let r0: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(&path, &empty, false);
+        let r0: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(&path, &empty, false, Palette0Pixels::Opaque);
         let err0 = r0.err().unwrap();
         assert!(matches!(err0,
             Error::PaletteTooShort { actual: 0, required: 2 }
         ), "{err0:?}");
 
         let one = vec![[0u8; 3]];
-        let r1: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(&path, &one, false);
+        let r1: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(&path, &one, false, Palette0Pixels::Opaque);
         let err1 = r1.err().unwrap();
         assert!(matches!(err1,
             Error::PaletteTooShort { actual: 1, required: 2 }
