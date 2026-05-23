@@ -28,6 +28,7 @@ All notable changes to this project will be documented in this file.
 - `draw_image_to_pixel_buffer` now does its inner-loop index arithmetic in `usize` instead of `u32`, matching the buffer-size calculation and removing a theoretical overflow on pathological canvas sizes.
 - Tests now write their fixtures into per-test `tempfile::TempDir` directories instead of fixed filenames in the process CWD, so partial-failure leftovers, cross-test filename collisions, and stale data between runs are no longer possible. Added `tempfile` as a dev-dependency.
 - Corrected the `palettized_image_to_png` doc comment: it no longer claims the output is always "RGB" (it is RGBA when `use_transparency = true`) and no longer refers to the palette as a "path".
+- `read_png` now emits a single summary `warn!` line per call when any input pixels are mapped non-exactly (reporting the count of unique non-exact colours and the maximum squared distance), instead of one `warn!` per unique non-exact colour. Documented that the nearest-colour metric is plain squared Euclidean on raw sRGB and is not perceptually uniform.
 - Return an error instead of panicking when image dimensions don't fit in the numeric type chosen by the caller.
 - `read_png` now requires the palette to have at least two entries (index 0 plus at least one opaque colour) and returns an error otherwise.
 - Minor stylistic code fixes.

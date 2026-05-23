@@ -293,6 +293,13 @@ where
 /// therefore contain at least two entries (one for the transparent colour
 /// plus at least one opaque colour to match against); otherwise an error of
 /// kind [`ErrorKind::InvalidInput`] is returned.
+///
+/// Nearest-colour matching uses plain squared Euclidean distance on the raw
+/// 8-bit sRGB channels. This is not perceptually uniform; for photographic
+/// inputs the "nearest" entry may not be the visually best match. If any
+/// pixels are mapped non-exactly, a single summary line is emitted at `warn`
+/// level reporting the number of unique non-exact colours and the maximum
+/// squared distance.
 pub fn read_png<O, S>(
     png_file_name: impl AsRef<Path>,
     palette: &[[u8; 3]],
@@ -330,12 +337,25 @@ where
     };
     let mut pixels = vec![0u8; stride * height as usize];
     let mut cache: HashMap<([u8; 3], Option<u8>), u8> = HashMap::new();
+    let mut non_exact_unique: u32 = 0;
+    let mut max_distance:     u32 = 0;
     for (i, chunk) in raw.chunks_exact(channels).enumerate() {
         let rgb = [chunk[0], chunk[1], chunk[2]];
         let alpha = if has_alpha { Some(chunk[3]) } else { None };
-        pixels[i] = *cache
-            .entry((rgb, alpha))
-            .or_insert_with(|| map_colour_to_palette_index(rgb, alpha, palette));
+        pixels[i] = *cache.entry((rgb, alpha)).or_insert_with(|| {
+            let (idx, dist) = map_colour_to_palette_index(rgb, alpha, palette);
+            if dist != 0 {
+                non_exact_unique += 1;
+                if dist > max_distance { max_distance = dist; }
+            }
+            idx
+        });
+    }
+    if non_exact_unique != 0 {
+        warn!(
+            "{}: {} unique colour(s) mapped non-exactly (max squared distance = {})",
+            png_file_name.display(), non_exact_unique, max_distance,
+        );
     }
 
     let (new_width, new_height, trim_left, trim_top) = if trim_transparent_pixels {
@@ -374,9 +394,19 @@ where
 /// Precondition: `palette.len() >= 2`. Callers must validate this; the
 /// nearest-colour search skips index 0, so a palette with fewer than two
 /// entries would yield an invalid result.
-fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u8; 3]]) -> u8 {
+///
+/// The distance metric is plain squared Euclidean distance on the raw 8-bit
+/// sRGB channels: `dr*dr + dg*dg + db*db`. This is not perceptually uniform
+/// — for hand-tuned palettes with well-separated entries this is fine, but
+/// for photographic inputs the "nearest" entry may not be the visually best
+/// match.
+///
+/// Returns `(palette_index, squared_distance)`. The distance is `0` on an
+/// exact match. For transparent pixels (`alpha == Some(0)`) the returned
+/// index is `0` and the distance is `0`.
+fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u8; 3]]) -> (u8, u32) {
     if alpha == Some(0) {
-        return 0; // Transparent
+        return (0, 0); // Transparent
     }
     if alpha != Some(255) && alpha.is_some() {
         warn!(
@@ -400,14 +430,7 @@ fn map_colour_to_palette_index(colour: [u8; 3], alpha: Option<u8>, palette: &[[u
         }
     }
 
-    if best_distance != 0 {
-        warn!(
-            "Non-exact colour match for pixel [{}, {}, {}] — using palette index {} (distance = {})",
-            colour[0], colour[1], colour[2], best_index, best_distance,
-        );
-    }
-
-    best_index as u8
+    (best_index as u8, best_distance)
 }
 
 fn trim_away_transparency(pixels: &[u8], width: u32, height: u32) -> (u32, u32, u32, u32) {
