@@ -6,6 +6,17 @@ use std::fs::File;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
 
+/// Numeric type usable as an offset or size on
+/// [`PalettizedImageWithMetadata`]. Blanket-implemented for every `Copy`
+/// type that round-trips through `u32` (`u8`, `u16`, `u32`, `u64`, `i32`,
+/// `usize`, ...).
+pub trait Coord: Copy + TryFrom<u32> + TryInto<u32, Error: Debug> {}
+
+impl<T> Coord for T
+where
+    T: Copy + TryFrom<u32> + TryInto<u32, Error: Debug>,
+{}
+
 /// A palettized image plus the offsets and dimensions needed to place it
 /// inside its original canvas.
 ///
@@ -23,11 +34,7 @@ use std::path::Path;
 ///   `palette[0]` is drawn as an opaque colour like any other entry.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub struct PalettizedImageWithMetadata<O, S>
-where
-    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug, // Offset type
-    S: TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug, // Image size type
-{
+pub struct PalettizedImageWithMetadata<O: Coord, S: Coord> {
     /// x-offset to where the image data starts
     pub x_offset: O,
     /// y-offset to where the image data starts
@@ -45,11 +52,7 @@ where
     pub palettized_image: Vec<u8>,
 }
 
-impl<O, S> PalettizedImageWithMetadata<O, S>
-where
-    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug,
-    S: TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug,
-{
+impl<O: Coord, S: Coord> PalettizedImageWithMetadata<O, S> {
     /// Constructs a `PalettizedImageWithMetadata` from its fields. Use this
     /// instead of struct-literal syntax: the struct is `#[non_exhaustive]`,
     /// so fields may be added in future without a SemVer break.
@@ -80,22 +83,19 @@ where
 /// offsets and original canvas size of an image produced by [`read_png`]
 /// with `trim_transparent_pixels = true`, use
 /// [`palettized_image_with_metadata_to_png`] instead.
-pub fn palettized_image_to_png<T>(
+pub fn palettized_image_to_png<T: Coord>(
     palettized_image: Vec<u8>,
     output_path: impl AsRef<Path>,
     palette: &[[u8; 3]],
     use_transparency: bool,
     width:  T,
     height: T,
-) -> Result<(), Error>
-where
-    T: Clone + TryFrom<u32> + TryInto<u32>, <T as TryInto<u32>>::Error: Debug,
-{
+) -> Result<(), Error> {
     let image: PalettizedImageWithMetadata<u8, T> = PalettizedImageWithMetadata {
         x_offset: 0,
         y_offset: 0,
-        width:  width.clone(),
-        height: height.clone(),
+        width,
+        height,
         original_width:  width,
         original_height: height,
         palettized_image,
@@ -108,18 +108,14 @@ where
 /// `original_width` × `original_height` canvas, with the palettized data
 /// placed at `(x_offset, y_offset)`. This is the round-trip counterpart of
 /// [`read_png`] with `trim_transparent_pixels = true`.
-pub fn palettized_image_with_metadata_to_png<O, S>(
+pub fn palettized_image_with_metadata_to_png<O: Coord, S: Coord>(
     image: PalettizedImageWithMetadata<O, S>,
     output_path: impl AsRef<Path>,
     palette: &[[u8; 3]],
     use_transparency: bool,
-) -> Result<(), Error>
-where
-    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug,
-    S: Clone + TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug,
-{
-    let canvas_width  = to_u32(image.original_width.clone(),  "original_width")?;
-    let canvas_height = to_u32(image.original_height.clone(), "original_height")?;
+) -> Result<(), Error> {
+    let canvas_width  = to_u32(image.original_width,  "original_width")?;
+    let canvas_height = to_u32(image.original_height, "original_height")?;
     let rgb_pixels = draw_image_to_pixel_buffer(image, palette, use_transparency)?;
     save_rgb_pixels_to_image_file(rgb_pixels, output_path, use_transparency, canvas_width, canvas_height)
 }
@@ -200,15 +196,11 @@ pub fn save_rgb_pixels_to_image_file(
 /// `palette[0]` is drawn as an opaque colour. See
 /// [`PalettizedImageWithMetadata`] for the full discussion of how index `0`
 /// is reserved on the read side and conditionally on the write side.
-pub fn draw_image_to_pixel_buffer<O, S>(
+pub fn draw_image_to_pixel_buffer<O: Coord, S: Coord>(
     image: PalettizedImageWithMetadata<O, S>,
     palette: &[[u8; 3]],
     use_transparency: bool,
-) -> std::io::Result<Vec<u8>>
-where
-    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug,
-    S: TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug,
-{
+) -> std::io::Result<Vec<u8>> {
     let height     = to_u32(image.height,          "height")?;
     let width      = to_u32(image.width,           "width")?;
     let x_offset   = to_u32(image.x_offset,        "x_offset")?;
@@ -321,15 +313,11 @@ where
 /// order of 4 GiB). Callers handling untrusted input should pre-validate the
 /// file's dimensions (for instance via `image::image_dimensions`) or impose
 /// their own size cap before calling this function.
-pub fn read_png<O, S>(
+pub fn read_png<O: Coord, S: Coord>(
     png_file_name: impl AsRef<Path>,
     palette: &[[u8; 3]],
     trim_transparent_pixels: bool,
-) -> std::io::Result<PalettizedImageWithMetadata<O, S>>
-where
-    O: TryFrom<u32> + TryInto<u32>, <O as TryInto<u32>>::Error: Debug,
-    S: TryFrom<u32> + TryInto<u32>, <S as TryInto<u32>>::Error: Debug,
-{
+) -> std::io::Result<PalettizedImageWithMetadata<O, S>> {
     if palette.len() < 2 {
         return Err(Error::new(ErrorKind::InvalidInput, format!(
             "palette must have at least 2 entries (index 0 is reserved for transparency), got {}",

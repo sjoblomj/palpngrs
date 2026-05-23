@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - `greyscale_palette` returns the palette directly instead of wrapping it in `Result`, since it cannot fail. Callers that previously used `?` or `unwrap` should drop them.
 - Take palette by slice (`&[[u8; 3]]`) instead of `&Vec<[u8; 3]>`, so callers don't have to materialise a `Vec` to pass in their palette.
 - `read_png` now uses a single flat `Vec<u8>` with stride indexing instead of a `Vec<Vec<u8>>` scratch buffer, removing the per-row allocations and a redundant full copy.
+- Introduced a `Coord` trait alias bundling the offset/size bounds previously repeated on every public signature. `Coord` now also requires `Copy`, which removes the `.clone()` requirement on coordinate values in user code. All numeric primitives satisfy the new bound.
 - `read_png` only converts the decoded image to RGBA when it actually has an alpha channel; RGB inputs are decoded as RGB, avoiding a full-image allocation.
 - `read_rgb_palette` now returns `ErrorKind::InvalidData` with a descriptive message when the palette file is not exactly 768 bytes, instead of silently ignoring trailing bytes or surfacing a bare `UnexpectedEof`.
 - Replaced the global colour-index cache with a per-call local `HashMap`. Consecutive calls with different palettes no longer give incorrect results.
