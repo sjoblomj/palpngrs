@@ -1,10 +1,69 @@
 use image::{ColorType, DynamicImage, ImageBuffer};
 use log::{debug, info, warn};
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Display};
 use std::fs::File;
-use std::io::{Error, ErrorKind, Read};
+use std::io::Read;
 use std::path::Path;
+
+/// Errors produced by the public API of `palpngrs`.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Error {
+    /// I/O failure while reading or writing a file.
+    Io(std::io::Error),
+    /// The `image` crate failed to decode or encode a PNG.
+    Image(image::ImageError),
+    /// A palette file did not contain exactly `expected` bytes.
+    PaletteFileWrongLength { actual: usize, expected: usize },
+    /// The palette has fewer entries than the operation requires.
+    PaletteTooShort { actual: usize, required: usize },
+    /// The palette is empty but the image to be drawn is not.
+    EmptyPalette,
+    /// A pixel references a palette entry that does not exist.
+    PaletteIndexOutOfRange { index: usize, palette_len: usize },
+    /// Input validation failure that is not one of the more specific
+    /// palette-related variants above. Covers numeric out-of-range casts,
+    /// arithmetic overflow on buffer-size computations, buffer-length
+    /// mismatches, and image regions positioned outside their declared
+    /// canvas. The wrapped message is intended for display and includes the
+    /// relevant runtime values.
+    Validation(String),
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Io(e)    => write!(f, "I/O error: {e}"),
+            Self::Image(e) => write!(f, "image error: {e}"),
+            Self::PaletteFileWrongLength { actual, expected } => write!(
+                f, "palette file is {actual} bytes, expected {expected} (256 RGB entries * 3 bytes)",
+            ),
+            Self::PaletteTooShort { actual, required } => write!(
+                f, "palette has {actual} entries, at least {required} required \
+                    (index 0 is reserved for transparency)",
+            ),
+            Self::EmptyPalette => write!(f, "palette is empty"),
+            Self::PaletteIndexOutOfRange { index, palette_len } => write!(
+                f, "palettized image contains index {index} but palette has only {palette_len} entries",
+            ),
+            Self::Validation(msg) => f.write_str(msg),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e)    => Some(e),
+            Self::Image(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error>    for Error { fn from(e: std::io::Error)    -> Self { Self::Io(e)    } }
+impl From<image::ImageError> for Error { fn from(e: image::ImageError) -> Self { Self::Image(e) } }
 
 /// Numeric type usable as an offset or size on
 /// [`PalettizedImageWithMetadata`]. Blanket-implemented for every `Copy`
@@ -149,19 +208,20 @@ pub fn palettized_image_with_metadata_to_png<O: Coord, S: Coord>(
 
 
 /// Reads a Palette file. Expects exactly 768 bytes (256 RGB entries * 3
-/// bytes); returns [`ErrorKind::InvalidData`] if the file is shorter or
-/// longer than that.
-pub fn read_rgb_palette(pal_path: impl AsRef<Path>) -> std::io::Result<Vec<[u8; 3]>> {
+/// bytes); returns [`Error::PaletteFileWrongLength`] if the file is shorter
+/// or longer than that. Underlying file-system failures are returned as
+/// [`Error::Io`].
+pub fn read_rgb_palette(pal_path: impl AsRef<Path>) -> Result<Vec<[u8; 3]>, Error> {
     const PALETTE_BYTES: usize = 768; // 256 RGB entries * 3 bytes
     let pal_path = pal_path.as_ref();
     let mut file = File::open(pal_path)?;
     let mut buffer = Vec::with_capacity(PALETTE_BYTES);
     file.read_to_end(&mut buffer)?;
     if buffer.len() != PALETTE_BYTES {
-        return Err(Error::new(ErrorKind::InvalidData, format!(
-            "palette file {} is {} bytes, expected {} (256 RGB entries * 3 bytes)",
-            pal_path.display(), buffer.len(), PALETTE_BYTES,
-        )));
+        return Err(Error::PaletteFileWrongLength {
+            actual:   buffer.len(),
+            expected: PALETTE_BYTES,
+        });
     }
 
     Ok(buffer.chunks(3).map(|c| [c[0], c[1], c[2]]).collect())
@@ -182,8 +242,9 @@ pub fn greyscale_palette() -> Vec<[u8; 3]> {
 /// Saves the given pixel buffer to the given output path. When
 /// `use_transparency` is `true` the buffer is interpreted as RGBA (4
 /// bytes per pixel); when `false` it is interpreted as RGB (3 bytes per
-/// pixel). Returns [`ErrorKind::InvalidInput`] if the buffer length does
-/// not match `width * height * channels`.
+/// pixel). Returns [`Error::Validation`] if the buffer length does not
+/// match `width * height * channels` (or if that product itself overflows
+/// `usize`), or [`Error::Image`] if the underlying encode/write fails.
 pub fn save_pixels_to_image_file(
     pixels: Vec<u8>,
     output_path: impl AsRef<Path>,
@@ -195,26 +256,32 @@ pub fn save_pixels_to_image_file(
     let expected_len = (width as usize)
         .checked_mul(height as usize)
         .and_then(|v| v.checked_mul(channels))
-        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "buffer size overflows usize"))?;
+        .ok_or_else(|| Error::Validation(format!(
+            "save_pixels buffer size overflows usize ({width}x{height} * {channels})",
+        )))?;
     if pixels.len() != expected_len {
-        return Err(Error::new(ErrorKind::InvalidInput, format!(
+        return Err(Error::Validation(format!(
             "pixels has {} bytes, expected {} ({}x{} * {} channels)",
             pixels.len(), expected_len, width, height, channels,
         )));
     }
 
+    // The buffer length is already validated above, so `from_raw` cannot
+    // return `None` here; surface a Validation error for safety.
     let image = if use_transparency {
         DynamicImage::ImageRgba8(
-            ImageBuffer::from_raw(width, height, pixels)
-                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "failed to create RGBA image"))?,
+            ImageBuffer::from_raw(width, height, pixels).ok_or_else(|| Error::Validation(
+                format!("failed to create RGBA image of {width}x{height}"),
+            ))?,
         )
     } else {
         DynamicImage::ImageRgb8(
-            ImageBuffer::from_raw(width, height, pixels)
-                .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "failed to create RGB image"))?,
+            ImageBuffer::from_raw(width, height, pixels).ok_or_else(|| Error::Validation(
+                format!("failed to create RGB image of {width}x{height}"),
+            ))?,
         )
     };
-    image.save(output_path).map_err(|e| Error::other(e.to_string()))
+    image.save(output_path).map_err(Error::Image)
 }
 
 /// Draws a palettized image into an RGB(A) pixel buffer (`Vec<u8>`).
@@ -231,7 +298,7 @@ pub fn draw_image_to_pixel_buffer<O: Coord, S: Coord>(
     image: PalettizedImageWithMetadata<O, S>,
     palette: &[[u8; 3]],
     use_transparency: bool,
-) -> std::io::Result<Vec<u8>> {
+) -> Result<Vec<u8>, Error> {
     let height     = to_u32(image.height,          "height")?;
     let width      = to_u32(image.width,           "width")?;
     let x_offset   = to_u32(image.x_offset,        "x_offset")?;
@@ -241,24 +308,24 @@ pub fn draw_image_to_pixel_buffer<O: Coord, S: Coord>(
 
     let expected_len = (width as usize)
         .checked_mul(height as usize)
-        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "image dimensions overflow usize"))?;
+        .ok_or_else(|| Error::Validation(format!(
+            "image dimensions overflow usize ({width}x{height})",
+        )))?;
     if image.palettized_image.len() < expected_len {
-        return Err(Error::new(ErrorKind::InvalidInput, format!(
+        return Err(Error::Validation(format!(
             "palettized_image has {} entries, expected at least {} ({}x{})",
             image.palettized_image.len(), expected_len, width, height,
         )));
     }
 
     if x_offset.checked_add(width).is_none_or(|v| v > max_width) {
-        return Err(Error::new(ErrorKind::InvalidInput, format!(
-            "x_offset ({}) + width ({}) exceeds original_width ({})",
-            x_offset, width, max_width,
+        return Err(Error::Validation(format!(
+            "x_offset ({x_offset}) + width ({width}) exceeds original_width ({max_width})",
         )));
     }
     if y_offset.checked_add(height).is_none_or(|v| v > max_height) {
-        return Err(Error::new(ErrorKind::InvalidInput, format!(
-            "y_offset ({}) + height ({}) exceeds original_height ({})",
-            y_offset, height, max_height,
+        return Err(Error::Validation(format!(
+            "y_offset ({y_offset}) + height ({height}) exceeds original_height ({max_height})",
         )));
     }
 
@@ -266,18 +333,19 @@ pub fn draw_image_to_pixel_buffer<O: Coord, S: Coord>(
     let buffer_size = (max_width as usize)
         .checked_mul(max_height as usize)
         .and_then(|v| v.checked_mul(channels))
-        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "buffer size overflows usize"))?;
+        .ok_or_else(|| Error::Validation(format!(
+            "draw buffer size overflows usize ({max_width}x{max_height} * {channels})",
+        )))?;
 
     if expected_len > 0 {
         if palette.is_empty() {
-            return Err(Error::new(ErrorKind::InvalidInput, "palette is empty"));
+            return Err(Error::EmptyPalette);
         }
         let max_index = *image.palettized_image[..expected_len].iter().max().unwrap() as usize;
         if max_index >= palette.len() {
-            return Err(Error::new(ErrorKind::InvalidInput, format!(
-                "palettized_image contains index {} but palette has only {} entries",
-                max_index, palette.len(),
-            )));
+            return Err(Error::PaletteIndexOutOfRange {
+                index: max_index, palette_len: palette.len(),
+            });
         }
     }
 
@@ -325,8 +393,8 @@ pub fn draw_image_to_pixel_buffer<O: Coord, S: Coord>(
 /// input pixels are written as `0`, and opaque input pixels are never mapped
 /// to `0` (even if `palette[0]` is the closest RGB match). The palette must
 /// therefore contain at least two entries (one for the transparent colour
-/// plus at least one opaque colour to match against); otherwise an error of
-/// kind [`ErrorKind::InvalidInput`] is returned.
+/// plus at least one opaque colour to match against); otherwise
+/// [`Error::PaletteTooShort`] is returned.
 ///
 /// Nearest-colour matching uses plain squared Euclidean distance on the raw
 /// 8-bit sRGB channels. This is not perceptually uniform; for photographic
@@ -348,16 +416,12 @@ pub fn read_png<O: Coord, S: Coord>(
     png_file_name: impl AsRef<Path>,
     palette: &[[u8; 3]],
     trim_transparent_pixels: bool,
-) -> std::io::Result<PalettizedImageWithMetadata<O, S>> {
+) -> Result<PalettizedImageWithMetadata<O, S>, Error> {
     if palette.len() < 2 {
-        return Err(Error::new(ErrorKind::InvalidInput, format!(
-            "palette must have at least 2 entries (index 0 is reserved for transparency), got {}",
-            palette.len(),
-        )));
+        return Err(Error::PaletteTooShort { actual: palette.len(), required: 2 });
     }
     let png_file_name = png_file_name.as_ref();
-    let img = image::open(png_file_name)
-        .map_err(|e| Error::other(e.to_string()))?;
+    let img = image::open(png_file_name)?;
     let has_alpha = matches!(
         img.color(),
         ColorType::Rgba8 | ColorType::La8 | ColorType::Rgba16 | ColorType::La16,
@@ -557,12 +621,12 @@ fn trim_away_transparency(pixels: &[u8], width: u32, height: u32) -> (u32, u32, 
     (new_width, new_height, trim_left, trim_top)
 }
 
-fn cast<T: TryFrom<u32>>(value: u32, name: &str) -> Result<T, Error> {
-    T::try_from(value).map_err(|_| Error::new(ErrorKind::InvalidInput, format!("{} out of range", name)))
+fn cast<T: TryFrom<u32>>(value: u32, name: &'static str) -> Result<T, Error> {
+    T::try_from(value).map_err(|_| Error::Validation(format!("{name} out of range")))
 }
 
-fn to_u32<T: TryInto<u32>>(value: T, name: &str) -> Result<u32, Error> {
-    value.try_into().map_err(|_| Error::new(ErrorKind::InvalidInput, format!("{} out of u32 range", name)))
+fn to_u32<T: TryInto<u32>>(value: T, name: &'static str) -> Result<u32, Error> {
+    value.try_into().map_err(|_| Error::Validation(format!("{name} out of u32 range")))
 }
 
 
@@ -805,7 +869,8 @@ mod tests {
         // Claims 4x4 but only provides 8 entries.
         let image = make_image(0, 0, 4, 4, 4, 4, vec![0u8; 8]);
         let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(&err, Error::Validation(msg) if msg.contains("palettized_image")),
+            "{err:?}");
     }
 
     #[test]
@@ -814,12 +879,14 @@ mod tests {
         // x_offset (3) + width (2) > original_width (4)
         let image = make_image(3, 0, 2, 2, 4, 4, vec![0u8; 4]);
         let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(&err, Error::Validation(msg) if msg.contains("x_offset")),
+            "{err:?}");
 
         // y_offset (3) + height (2) > original_height (4)
         let image = make_image(0, 3, 2, 2, 4, 4, vec![0u8; 4]);
         let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(&err, Error::Validation(msg) if msg.contains("y_offset")),
+            "{err:?}");
     }
 
     #[test]
@@ -827,7 +894,9 @@ mod tests {
         let palette = vec![[0u8; 3]; 3]; // valid indices: 0..=2
         let image = make_image(0, 0, 2, 2, 2, 2, vec![0, 1, 2, 5]);
         let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(err,
+            Error::PaletteIndexOutOfRange { index: 5, palette_len: 3 }
+        ), "{err:?}");
     }
 
     #[test]
@@ -835,7 +904,7 @@ mod tests {
         let palette: Vec<[u8; 3]> = Vec::new();
         let image = make_image(0, 0, 1, 1, 1, 1, vec![0]);
         let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(err, Error::EmptyPalette), "{err:?}");
     }
 
     #[test]
@@ -849,7 +918,8 @@ mod tests {
             palettized_image: vec![0u8; 0],
         };
         let err = draw_image_to_pixel_buffer(image, &palette, false).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(&err, Error::Validation(msg) if msg.contains("width")),
+            "{err:?}");
     }
 
     #[test]
@@ -865,7 +935,8 @@ mod tests {
             1u64,
         );
         let err = result.unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(&err, Error::Validation(msg) if msg.contains("original_width")),
+            "{err:?}");
     }
 
     #[test]
@@ -982,7 +1053,8 @@ mod tests {
             2,
             2,
         ).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(&err, Error::Validation(msg) if msg.contains("pixels has 11 bytes")),
+            "{err:?}");
     }
 
     #[test]
@@ -995,7 +1067,8 @@ mod tests {
             2,
             2,
         ).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(matches!(&err, Error::Validation(msg) if msg.contains("pixels has 15 bytes")),
+            "{err:?}");
     }
 
     #[test]
@@ -1023,7 +1096,9 @@ mod tests {
         fs::write(&path, vec![0u8; 767])?;
 
         let err = read_rgb_palette(&path).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert!(matches!(err,
+            Error::PaletteFileWrongLength { actual: 767, expected: 768 }
+        ), "{err:?}");
 
         Ok(())
     }
@@ -1034,7 +1109,9 @@ mod tests {
         fs::write(&path, vec![0u8; 769])?;
 
         let err = read_rgb_palette(&path).unwrap_err();
-        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert!(matches!(err,
+            Error::PaletteFileWrongLength { actual: 769, expected: 768 }
+        ), "{err:?}");
 
         Ok(())
     }
@@ -1046,11 +1123,17 @@ mod tests {
 
         let empty: Vec<[u8; 3]> = Vec::new();
         let r0: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(&path, &empty, false);
-        assert_eq!(r0.err().unwrap().kind(), ErrorKind::InvalidInput);
+        let err0 = r0.err().unwrap();
+        assert!(matches!(err0,
+            Error::PaletteTooShort { actual: 0, required: 2 }
+        ), "{err0:?}");
 
         let one = vec![[0u8; 3]];
         let r1: Result<PalettizedImageWithMetadata<u8, u16>, Error> = read_png(&path, &one, false);
-        assert_eq!(r1.err().unwrap().kind(), ErrorKind::InvalidInput);
+        let err1 = r1.err().unwrap();
+        assert!(matches!(err1,
+            Error::PaletteTooShort { actual: 1, required: 2 }
+        ), "{err1:?}");
 
         Ok(())
     }
