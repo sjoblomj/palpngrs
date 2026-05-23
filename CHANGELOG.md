@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - `palettized_image_with_metadata_to_png` takes a full `PalettizedImageWithMetadata` and writes it to a PNG sized to the original canvas, so trimmed images produced by `read_png` can be round-tripped in one call.
 - `PalettizedImageWithMetadata::new` constructor for use by external callers; the struct is now `#[non_exhaustive]` so future fields can be added without a SemVer break.
 - `PalettizedImageWithMetadata` now derives `Debug`, `Clone`, `PartialEq`, `Eq`, and `Hash`, so it can be logged, cloned, and compared in user code without manual impls.
+- `Offset<T>` and `Size<T>` value types, used to group the arguments to `PalettizedImageWithMetadata::new` so `x`/`y` and the three `width`/`height` pairs cannot be silently swapped at the call site.
 - Two new sections to the readme.
 
 ### Changed
@@ -15,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - Take palette by slice (`&[[u8; 3]]`) instead of `&Vec<[u8; 3]>`, so callers don't have to materialise a `Vec` to pass in their palette.
 - `read_png` now uses a single flat `Vec<u8>` with stride indexing instead of a `Vec<Vec<u8>>` scratch buffer, removing the per-row allocations and a redundant full copy.
 - Introduced a `Coord` trait alias bundling the offset/size bounds previously repeated on every public signature. `Coord` now also requires `Copy`, which removes the `.clone()` requirement on coordinate values in user code. All numeric primitives satisfy the new bound.
+- `PalettizedImageWithMetadata::new` now takes `Offset<O>`, `Size<S>`, `Size<S>`, `Vec<u8>` instead of seven positional `O`/`S` arguments. Callers should update from `new(x, y, w, h, ow, oh, pixels)` to `new(Offset::new(x, y), Size::new(w, h), Size::new(ow, oh), pixels)`. The struct's public fields are unchanged, so code that reads `image.width`, `image.x_offset`, etc. continues to work.
 - `read_png` only converts the decoded image to RGBA when it actually has an alpha channel; RGB inputs are decoded as RGB, avoiding a full-image allocation.
 - `read_rgb_palette` now returns `ErrorKind::InvalidData` with a descriptive message when the palette file is not exactly 768 bytes, instead of silently ignoring trailing bytes or surfacing a bare `UnexpectedEof`.
 - Replaced the global colour-index cache with a per-call local `HashMap`. Consecutive calls with different palettes no longer give incorrect results.

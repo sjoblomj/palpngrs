@@ -17,6 +17,32 @@ where
     T: Copy + TryFrom<u32> + TryInto<u32, Error: Debug>,
 {}
 
+/// A 2-D offset in coordinate type `T`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Offset<T: Coord> {
+    pub x: T,
+    pub y: T,
+}
+
+impl<T: Coord> Offset<T> {
+    pub fn new(x: T, y: T) -> Self {
+        Self { x, y }
+    }
+}
+
+/// A 2-D size (width by height) in coordinate type `T`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Size<T: Coord> {
+    pub width:  T,
+    pub height: T,
+}
+
+impl<T: Coord> Size<T> {
+    pub fn new(width: T, height: T) -> Self {
+        Self { width, height }
+    }
+}
+
 /// A palettized image plus the offsets and dimensions needed to place it
 /// inside its original canvas.
 ///
@@ -53,22 +79,23 @@ pub struct PalettizedImageWithMetadata<O: Coord, S: Coord> {
 }
 
 impl<O: Coord, S: Coord> PalettizedImageWithMetadata<O, S> {
-    /// Constructs a `PalettizedImageWithMetadata` from its fields. Use this
-    /// instead of struct-literal syntax: the struct is `#[non_exhaustive]`,
-    /// so fields may be added in future without a SemVer break.
+    /// Constructs a `PalettizedImageWithMetadata` from its grouped fields.
+    /// Use this instead of struct-literal syntax: the struct is
+    /// `#[non_exhaustive]`, so fields may be added in future without a
+    /// SemVer break.
     pub fn new(
-        x_offset: O,
-        y_offset: O,
-        width:           S,
-        height:          S,
-        original_width:  S,
-        original_height: S,
+        offset:           Offset<O>,
+        size:             Size<S>,
+        original_size:    Size<S>,
         palettized_image: Vec<u8>,
     ) -> Self {
         Self {
-            x_offset, y_offset,
-            width, height,
-            original_width, original_height,
+            x_offset: offset.x,
+            y_offset: offset.y,
+            width:    size.width,
+            height:   size.height,
+            original_width:  original_size.width,
+            original_height: original_size.height,
             palettized_image,
         }
     }
@@ -922,7 +949,12 @@ mod tests {
     #[test]
     fn palettized_image_with_metadata_constructor_and_derives() {
         let a: PalettizedImageWithMetadata<u8, u16> =
-            PalettizedImageWithMetadata::new(1, 2, 3, 4, 5, 6, vec![7, 8, 9]);
+            PalettizedImageWithMetadata::new(
+                Offset::new(1, 2),
+                Size::new(3, 4),
+                Size::new(5, 6),
+                vec![7, 8, 9],
+            );
         let b = a.clone();
         assert_eq!(a, b);
         assert_eq!(a.x_offset,        1);
